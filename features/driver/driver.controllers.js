@@ -97,20 +97,52 @@ export const createDriver = async (req, res) => {
   }
 };
 
+const normalizePhone = (value) => {
+  if (!value) return value;
+  // Оставляем только цифры
+  return value.replace(/\D/g, "");
+};
+
 export const loginDriver = async (req, res) => {
   try {
     const { phone, password } = req.body;
-    if (!phone || !password)
-      return res.status(400).json({ message: "Телефон и пароль обязательны" });
 
-    const driver = await Driver.findOne({ where: { phone } });
-    if (!driver) return res.status(401).json({ message: "Неверные данные" });
+    if (!phone || !password) {
+      return res.status(400).json({ message: "Телефон и пароль обязательны" });
+    }
+
+    const normalizedPhone = normalizePhone(phone);
+
+    console.log("[LOGIN_DRIVER] login_attempt", {
+      phoneRaw: phone,
+      phoneNormalized: normalizedPhone,
+    });
+
+    const driver = await Driver.findOne({ where: { phone: normalizedPhone } });
+
+    if (!driver) {
+      console.log("[LOGIN_DRIVER] driver_not_found", {
+        phoneNormalized: normalizedPhone,
+      });
+      return res.status(401).json({ message: "Неверные данные" });
+    }
 
     const ok = await bcrypt.compare(password, driver.passwordHash);
-    if (!ok) return res.status(401).json({ message: "Неверные данные" });
 
-    if (["blocked", "pending"].includes(driver.status))
+    if (!ok) {
+      console.log("[LOGIN_DRIVER] wrong_password", {
+        driverId: driver.id,
+      });
+      return res.status(401).json({ message: "Неверные данные" });
+    }
+
+    if (["blocked", "pending"].includes(driver.status)) {
+      console.log("[LOGIN_DRIVER] access_denied", {
+        driverId: driver.id,
+        status: driver.status,
+      });
       return res.status(403).json({ message: "Доступ запрещён" });
+    }
 
     const token = jwt.sign(
       { id: driver.id, role: "driver" },
@@ -120,9 +152,13 @@ export const loginDriver = async (req, res) => {
 
     const { passwordHash, ...data } = driver.toJSON();
 
+    console.log("[LOGIN_DRIVER] success", {
+      driverId: driver.id,
+    });
+
     return res.json({ token, driver: data });
   } catch (e) {
-    console.error(e);
+    console.error("[LOGIN_DRIVER] error", e);
     return res.status(500).json({ message: "Ошибка входа" });
   }
 };
