@@ -314,6 +314,7 @@ export const getDriverProfile = async (req, res) => {
         "level",
         "priorityScore",
         "vehicleId",
+        "photo",
       ],
       include: [
         {
@@ -353,7 +354,7 @@ export const getDriverProfile = async (req, res) => {
       balance: driver.balance,
       level: driver.level,
       priorityScore: driver.priorityScore,
-
+      photo: driver.photo || null,
       vehicle: driver.vehicle || null,
     });
   } catch (e) {
