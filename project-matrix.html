@@ -1,0 +1,1433 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Architecture Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #030712;
+            --bg-panel: #111827;
+            --border: #374151;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent: #10b981;
+            --accent-hover: #059669;
+            --active-bg: rgba(16, 185, 129, 0.1);
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: "Inter", sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 260px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 20px 0;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .sidebar-title {
+            padding: 0 24px 20px;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent);
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 10px;
+        }
+        .menu-item {
+            padding: 12px 24px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-muted);
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+        }
+        .menu-item:hover {
+            background: rgba(255,255,255,0.03);
+            color: #fff;
+        }
+        .menu-item.active {
+            background: var(--active-bg);
+            color: var(--accent);
+            border-left: 3px solid var(--accent);
+        }
+
+        .main {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            position: relative;
+        }
+        
+        .tab-content { display: none; animation: fadeIn 0.3s ease; }
+        .tab-content.active { display: block; }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .module-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 15px;
+        }
+        .module-header h2 { margin: 0; color: #fff; font-size: 24px; }
+        .module-header .path { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted); }
+
+        .table-container {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow-x: auto;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+        }
+        table { border-collapse: collapse; width: 100%; min-width: 800px; }
+        
+        th {
+            padding: 12px;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            border-bottom: 2px solid var(--border);
+            vertical-align: bottom;
+            background: #1f2937;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        th.rotate { height: 140px; white-space: nowrap; position: relative; }
+        th.rotate > div:first-child {
+            transform: translate(5px, -10px) rotate(-45deg);
+            width: 30px;
+            transform-origin: bottom left;
+        }
+        th.rotate > div:first-child > span {
+            padding: 5px;
+            color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }
+        .th-desc {
+            position: absolute;
+            bottom: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 9px;
+            color: #6b7280;
+            font-weight: 400;
+            opacity: 0; 
+        }
+
+        td { padding: 12px; border-bottom: 1px solid rgba(55, 65, 81, 0.5); font-size: 13px; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background-color: rgba(255, 255, 255, 0.02); }
+
+        .controller-name { padding-left: 16px; border-right: 1px solid var(--border); }
+        .en-name { font-weight: 700; color: #fff; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+        .ru-name { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+        
+        .role-badge { color: var(--text-muted); font-size: 11px; font-family: 'JetBrains Mono', monospace; line-height: 1.4; border-right: 1px solid var(--border); }
+
+        .active { text-align: center; background: rgba(16, 185, 129, 0.05); }
+        .inactive { text-align: center; }
+        .dot { 
+            height: 8px; width: 8px; 
+            background-color: var(--accent); 
+            border-radius: 50%; 
+            display: inline-block; 
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.8); 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="sidebar-title">Nurai Solutions</div>
+        
+      <div class="menu-item active" onclick="openTab('user', this)">
+        👤 Users & Auth
+      </div>
+    
+      <div class="menu-item " onclick="openTab('driver', this)">
+        🚖 Drivers
+      </div>
+    
+      <div class="menu-item " onclick="openTab('client', this)">
+        🙋‍♂️ Clients
+      </div>
+    
+      <div class="menu-item " onclick="openTab('tariff', this)">
+        💲 Tariffs
+      </div>
+    
+      <div class="menu-item " onclick="openTab('order', this)">
+        📦 Orders
+      </div>
+    
+      <div class="menu-item " onclick="openTab('orderRoute', this)">
+        📍 Order Routes
+      </div>
+    
+      <div class="menu-item " onclick="openTab('transaction', this)">
+        💰 Transactions
+      </div>
+    
+      <div class="menu-item " onclick="openTab('vehiclePhoto', this)">
+        📸 Vehicle Photos
+      </div>
+    
+      <div class="menu-item " onclick="openTab('chat', this)">
+        💬 Chats
+      </div>
+    
+      <div class="menu-item " onclick="openTab('chatMsg', this)">
+        📩 Chat Messages
+      </div>
+    
+      <div class="menu-item " onclick="openTab('review', this)">
+        ⭐ Reviews
+      </div>
+    
+      <div class="menu-item " onclick="openTab('carBrand', this)">
+        🏷️ Car Brands
+      </div>
+    
+    </div>
+
+    <div class="main">
+        
+      <div id="user" class="tab-content active">
+        <div class="module-header">
+            <h2>👤 Users & Auth</h2>
+            <span class="path">features\user\user.controllers.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">Уникальный ID (генерируется автоматически)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>phone</span></div>
+        <div class="th-desc">Номер телефона (используется как логин)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>passwordHash</span></div>
+        <div class="th-desc">Хэш пароля (зашифровано bcrypt)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>role</span></div>
+        <div class="th-desc">Роль (superadmin, admin, dispatcher, park)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>name</span></div>
+        <div class="th-desc">Имя пользователя или название парка</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>isActive</span></div>
+        <div class="th-desc">Статус (false = удален/заблокирован)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createSuperAdmin</div>
+            <div class="ru-name">Создание Супер-Админа</div>
+          </td>
+          <td class="role-badge">Public</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createUser</div>
+            <div class="ru-name">Создание Пользователя</div>
+          </td>
+          <td class="role-badge">Admin<br/>Superadmin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">login</div>
+            <div class="ru-name">Вход в Систему</div>
+          </td>
+          <td class="role-badge">Public</td>
+          <td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getMe</div>
+            <div class="ru-name">Мой Профиль</div>
+          </td>
+          <td class="role-badge">Auth_User</td>
+          <td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">listUsers</div>
+            <div class="ru-name">Список Пользователей</div>
+          </td>
+          <td class="role-badge">Admin<br/>Superadmin</td>
+          <td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getUserById</div>
+            <div class="ru-name">Получить по ID</div>
+          </td>
+          <td class="role-badge">Admin<br/>Superadmin</td>
+          <td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">updateUser</div>
+            <div class="ru-name">Обновление Данных</div>
+          </td>
+          <td class="role-badge">Admin<br/>Superadmin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">deleteUser</div>
+            <div class="ru-name">Деактивация</div>
+          </td>
+          <td class="role-badge">Admin<br/>Superadmin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">updateUserPasswordBySuperAdmin</div>
+            <div class="ru-name">Смена Пароля Admin</div>
+          </td>
+          <td class="role-badge">Superadmin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="driver" class="tab-content ">
+        <div class="module-header">
+            <h2>🚖 Drivers</h2>
+            <span class="path">features\driver\driver.controllers.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">Уникальный ID водителя</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>firstName</span></div>
+        <div class="th-desc">Имя</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>lastName</span></div>
+        <div class="th-desc">Фамилия</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>phone</span></div>
+        <div class="th-desc">Телефон (Логин)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>pin</span></div>
+        <div class="th-desc">ПИН/ИНН (Уникальный идентификатор гражданина)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>passportNumber</span></div>
+        <div class="th-desc">Номер паспорта</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>licenseNumber</span></div>
+        <div class="th-desc">Номер водительского удостоверения</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>balance</span></div>
+        <div class="th-desc">Текущий баланс (заработок)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>rating</span></div>
+        <div class="th-desc">Рейтинг (1.0 - 5.0)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>status</span></div>
+        <div class="th-desc">Статус (pending, active, blocked, on_shift)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>workType</span></div>
+        <div class="th-desc">Тип работы (taxi, courier_auto, truck, etc.)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>currentLat</span></div>
+        <div class="th-desc">Текущая широта (GPS)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>currentLon</span></div>
+        <div class="th-desc">Текущая долгота (GPS)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>isOnline</span></div>
+        <div class="th-desc">На линии / Офлайн</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>fcmToken</span></div>
+        <div class="th-desc">Push-токен для заказов</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>passwordHash</span></div>
+        <div class="th-desc">Хэш пароля</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createDriver</div>
+            <div class="ru-name">Регистрация Водителя</div>
+          </td>
+          <td class="role-badge">Public/Admin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getDrivers</div>
+            <div class="ru-name">Список Водителей</div>
+          </td>
+          <td class="role-badge">Admin<br/>Dispatcher</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getDriverById</div>
+            <div class="ru-name">Профиль Водителя</div>
+          </td>
+          <td class="role-badge">Admin<br/>Dispatcher</td>
+          <td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">updateDriver</div>
+            <div class="ru-name">Редактирование Данных</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">changeDriverStatus</div>
+            <div class="ru-name">Смена Статуса</div>
+          </td>
+          <td class="role-badge">Admin<br/>Dispatcher</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">changeDriverWorkType</div>
+            <div class="ru-name">Смена Типа Работы</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">deleteDriver</div>
+            <div class="ru-name">Удаление Водителя</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="client" class="tab-content ">
+        <div class="module-header">
+            <h2>🙋‍♂️ Clients</h2>
+            <span class="path">features\client\client.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">Уникальный ID</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>phone</span></div>
+        <div class="th-desc">Номер телефона (Логин)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>passwordHash</span></div>
+        <div class="th-desc">Пароль (если используется)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>name</span></div>
+        <div class="th-desc">Имя клиента</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>rating</span></div>
+        <div class="th-desc">Рейтинг (по умолчанию 5.0)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>language</span></div>
+        <div class="th-desc">Язык (ru, kg, en)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>fcmToken</span></div>
+        <div class="th-desc">Push-токен (Firebase)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>bonusBalance</span></div>
+        <div class="th-desc">Бонусы на счету</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>isActive</span></div>
+        <div class="th-desc">Статус (false = заблокирован)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createClient</div>
+            <div class="ru-name">Создать Клиента</div>
+          </td>
+          <td class="role-badge">Admin<br/>Dispatcher</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">listClients</div>
+            <div class="ru-name">Список Клиентов</div>
+          </td>
+          <td class="role-badge">Admin<br/>Dispatcher</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getClientById</div>
+            <div class="ru-name">Профиль Клиента</div>
+          </td>
+          <td class="role-badge">Admin<br/>Dispatcher</td>
+          <td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">updateClient</div>
+            <div class="ru-name">Редактировать Клиента</div>
+          </td>
+          <td class="role-badge">Admin<br/>Dispatcher</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">deleteClient</div>
+            <div class="ru-name">Блокировка Клиента</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="tariff" class="tab-content ">
+        <div class="module-header">
+            <h2>💲 Tariffs</h2>
+            <span class="path">features\tariff\tariff.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">Уникальный ID</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>category</span></div>
+        <div class="th-desc">Категория (taxi, delivery, cargo)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>name</span></div>
+        <div class="th-desc">Техническое имя (econom, business...)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>basePrice</span></div>
+        <div class="th-desc">Стоимость подачи</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>pricePerKm</span></div>
+        <div class="th-desc">Цена за километр</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>pricePerMinute</span></div>
+        <div class="th-desc">Цена за минуту</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>waitingPrice</span></div>
+        <div class="th-desc">Цена ожидания</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>isActive</span></div>
+        <div class="th-desc">Активность тарифа</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createTariff</div>
+            <div class="ru-name">Создать Тариф</div>
+          </td>
+          <td class="role-badge">Admin<br/>Superadmin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">listTariffs</div>
+            <div class="ru-name">Список Тарифов</div>
+          </td>
+          <td class="role-badge">Public<br/>Auth</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getTariffById</div>
+            <div class="ru-name">Детали Тарифа</div>
+          </td>
+          <td class="role-badge">Public<br/>Auth</td>
+          <td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">updateTariff</div>
+            <div class="ru-name">Обновить Тариф</div>
+          </td>
+          <td class="role-badge">Admin<br/>Superadmin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">deleteTariff</div>
+            <div class="ru-name">Архивировать Тариф</div>
+          </td>
+          <td class="role-badge">Admin<br/>Superadmin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="order" class="tab-content ">
+        <div class="module-header">
+            <h2>📦 Orders</h2>
+            <span class="path">features\order\order.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">ID заказа</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>publicNumber</span></div>
+        <div class="th-desc">Короткий номер для клиента (например, 4521)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>status</span></div>
+        <div class="th-desc">(new, driver_assigned, driver_arrived, in_progress, completed, cancelled)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>clientId</span></div>
+        <div class="th-desc">Кто заказал</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>driverId</span></div>
+        <div class="th-desc">Кто везет</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>tariffId</span></div>
+        <div class="th-desc">По какому тарифу</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>fromAddress</span></div>
+        <div class="th-desc">Адрес подачи</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>toAddress</span></div>
+        <div class="th-desc">Адрес назначения</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>estimatedPrice</span></div>
+        <div class="th-desc">Предварительная цена</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>finalPrice</span></div>
+        <div class="th-desc">Итоговая цена (по таксометру)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>paymentMethod</span></div>
+        <div class="th-desc">cash, card, bonus</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>isPaid</span></div>
+        <div class="th-desc">Оплачен ли заказ</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>distanceKm</span></div>
+        <div class="th-desc">Фактическое расстояние</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>durationMin</span></div>
+        <div class="th-desc">Фактическое время в пути</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>scheduledAt</span></div>
+        <div class="th-desc">Время предварительного заказа (если есть)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createOrder</div>
+            <div class="ru-name">Создать Заказ</div>
+          </td>
+          <td class="role-badge">Client<br/>Dispatcher</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">acceptOrder</div>
+            <div class="ru-name">Принять Заказ</div>
+          </td>
+          <td class="role-badge">Driver</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">updateOrderStatus</div>
+            <div class="ru-name">Изменить Статус</div>
+          </td>
+          <td class="role-badge">Driver</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">finishOrder</div>
+            <div class="ru-name">Завершить Заказ</div>
+          </td>
+          <td class="role-badge">Driver</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">listOrders</div>
+            <div class="ru-name">История Заказов</div>
+          </td>
+          <td class="role-badge">Admin<br/>Dispatcher</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getOrderById</div>
+            <div class="ru-name">Детали Заказа</div>
+          </td>
+          <td class="role-badge">Admin<br/>Driver<br/>Client</td>
+          <td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="orderRoute" class="tab-content ">
+        <div class="module-header">
+            <h2>📍 Order Routes</h2>
+            <span class="path">features\orderRoutePoint\orderRoutePoint.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">ID точки</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>orderId</span></div>
+        <div class="th-desc">Ссылка на заказ</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>sequence</span></div>
+        <div class="th-desc">Порядковый номер (1, 2, 3...)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>address</span></div>
+        <div class="th-desc">Адрес текстом</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>lat</span></div>
+        <div class="th-desc">Широта</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>lng</span></div>
+        <div class="th-desc">Долгота</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>isVisited</span></div>
+        <div class="th-desc">Посещена ли точка (true = водитель был здесь)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="100" style="text-align:center; padding: 20px; color: #6b7280;">Нет действий с меткой @map</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="transaction" class="tab-content ">
+        <div class="module-header">
+            <h2>💰 Transactions</h2>
+            <span class="path">features\driverTransaction\transaction.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">Уникальный ID транзакции</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>driverId</span></div>
+        <div class="th-desc">ID водителя (Кошелек)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>orderId</span></div>
+        <div class="th-desc">ID заказа (за что списание/начисление)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>amount</span></div>
+        <div class="th-desc">Сумма операции</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>type</span></div>
+        <div class="th-desc">Тип (deposit, bonus, commission, withdrawal, penalty, subscription)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>description</span></div>
+        <div class="th-desc">Комментарий или причина</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>balanceAfter</span></div>
+        <div class="th-desc">Снимок баланса после операции (для сверки)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">changeDriverBalance</div>
+            <div class="ru-name">Изменить Баланс</div>
+          </td>
+          <td class="role-badge">Admin/System</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getDriverHistory</div>
+            <div class="ru-name">История Водителя</div>
+          </td>
+          <td class="role-badge">Admin/Driver</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getAllTransactions</div>
+            <div class="ru-name">Все Транзакции</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="vehiclePhoto" class="tab-content ">
+        <div class="module-header">
+            <h2>📸 Vehicle Photos</h2>
+            <span class="path">features\vehicle\vehicle-photo.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">ID фото</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>vehicleId</span></div>
+        <div class="th-desc">Ссылка на транспорт</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>imageUrl</span></div>
+        <div class="th-desc">Ссылка на файл</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>type</span></div>
+        <div class="th-desc">Ракурс (front, back, interior, cargo...)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>status</span></div>
+        <div class="th-desc">Статус модерации (pending, approved, rejected)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>rejectionReason</span></div>
+        <div class="th-desc">Причина отказа (если есть)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createVehiclePhoto</div>
+            <div class="ru-name">Загрузить фото</div>
+          </td>
+          <td class="role-badge">Driver</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">moderatePhoto</div>
+            <div class="ru-name">Модерация фото</div>
+          </td>
+          <td class="role-badge">Dispatcher<br/>Admin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getVehiclePhotos</div>
+            <div class="ru-name">Получить фото авто</div>
+          </td>
+          <td class="role-badge">Driver<br/>Dispatcher</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">deletePhoto</div>
+            <div class="ru-name">Удалить фото</div>
+          </td>
+          <td class="role-badge">Driver<br/>Admin</td>
+          <td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="chat" class="tab-content ">
+        <div class="module-header">
+            <h2>💬 Chats</h2>
+            <span class="path">features\chat\chat.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">Уникальный ID чата</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>type</span></div>
+        <div class="th-desc">Тип чата (обычно 'order' или 'support')</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>status</span></div>
+        <div class="th-desc">Статус (active, closed, archived)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>orderId</span></div>
+        <div class="th-desc">Ссылка на Заказ</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>clientId</span></div>
+        <div class="th-desc">Ссылка на Клиента</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>driverId</span></div>
+        <div class="th-desc">Ссылка на Водителя</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>adminId</span></div>
+        <div class="th-desc">Ссылка на Админа (если участвует)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getOrCreateOrderChat</div>
+            <div class="ru-name">Создать/Найти Чат</div>
+          </td>
+          <td class="role-badge">Public/Auth</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">sendMessage</div>
+            <div class="ru-name">Отправить Сообщение</div>
+          </td>
+          <td class="role-badge">Auth/Driver/Client</td>
+          <td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getChatMessages</div>
+            <div class="ru-name">История Сообщений</div>
+          </td>
+          <td class="role-badge">Auth</td>
+          <td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getAllChats</div>
+            <div class="ru-name">Все Чаты</div>
+          </td>
+          <td class="role-badge">Admin/Dispatcher</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="chatMsg" class="tab-content ">
+        <div class="module-header">
+            <h2>📩 Chat Messages</h2>
+            <span class="path">features\chatMessage\chatMessage.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">Уникальный ID сообщения</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>chatId</span></div>
+        <div class="th-desc">ID чата, к которому относится сообщение</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>senderId</span></div>
+        <div class="th-desc">ID отправителя (Driver, Client или Admin)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>senderRole</span></div>
+        <div class="th-desc">Роль отправителя (driver, client, admin)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>contentType</span></div>
+        <div class="th-desc">Тип (text, image, voice, system)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>content</span></div>
+        <div class="th-desc">Текст сообщения или ссылка на файл</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>isRead</span></div>
+        <div class="th-desc">Статус прочтения (false = новое)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="100" style="text-align:center; padding: 20px; color: #6b7280;">Нет действий с меткой @map</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="review" class="tab-content ">
+        <div class="module-header">
+            <h2>⭐ Reviews</h2>
+            <span class="path">features\review\review.controller.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">ID отзыва</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>orderId</span></div>
+        <div class="th-desc">Ссылка на заказ</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>reviewerId</span></div>
+        <div class="th-desc">Кто оставил отзыв (ID)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>targetId</span></div>
+        <div class="th-desc">Кому оставили отзыв (ID)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>targetRole</span></div>
+        <div class="th-desc">Роль получателя (driver, client)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>score</span></div>
+        <div class="th-desc">Оценка (1-5)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>comment</span></div>
+        <div class="th-desc">Текст комментария</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createReview</div>
+            <div class="ru-name">Оставить отзыв</div>
+          </td>
+          <td class="role-badge">Client<br/>Driver</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getReviewsByTarget</div>
+            <div class="ru-name">Получить отзывы</div>
+          </td>
+          <td class="role-badge">Public</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">deleteReview</div>
+            <div class="ru-name">Удалить отзыв</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+      <div id="carBrand" class="tab-content ">
+        <div class="module-header">
+            <h2>🏷️ Car Brands</h2>
+            <span class="path">features\carBrands\carBrands.controllers.js</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left; min-width: 200px; padding-left: 16px;">🎮 Action</th>
+                <th style="min-width: 140px;">🔒 Roles</th>
+                
+      <th class="rotate">
+        <div><span>id</span></div>
+        <div class="th-desc">Уникальный ID (генерируется автоматически)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>make</span></div>
+        <div class="th-desc">Марка автомобиля (например, Toyota)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>model</span></div>
+        <div class="th-desc">Модель автомобиля (например, Camry)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>doors</span></div>
+        <div class="th-desc">Количество дверей</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>powertrain</span></div>
+        <div class="th-desc">Тип двигателя (ice = ДВС, ev = Электро)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>minYearEconom</span></div>
+        <div class="th-desc">Мин. год для тарифа Эконом (null = нельзя)</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>minYearElectro</span></div>
+        <div class="th-desc">Мин. год для тарифа Электро</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>minYearComfort</span></div>
+        <div class="th-desc">Мин. год для тарифа Комфорт</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>minYearComfortPlus</span></div>
+        <div class="th-desc">Мин. год для тарифа Комфорт+</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>minYearBusiness</span></div>
+        <div class="th-desc">Мин. год для тарифа Бизнес</div>
+      </th>
+    
+      <th class="rotate">
+        <div><span>isActive</span></div>
+        <div class="th-desc">Активность справочника (false = скрыт)</div>
+      </th>
+    
+              </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getCarModels</div>
+            <div class="ru-name">Список Моделей</div>
+          </td>
+          <td class="role-badge">Public/Auth</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">getCarMakes</div>
+            <div class="ru-name">Список Марок</div>
+          </td>
+          <td class="role-badge">Public/Auth</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">createCarModel</div>
+            <div class="ru-name">Создать Модель</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">bulkUpsertCarModelsByTariff</div>
+            <div class="ru-name">Массовый Импорт</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="inactive"></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">updateCarModel</div>
+            <div class="ru-name">Обновить Модель</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">blockCarModel</div>
+            <div class="ru-name">Блокировка</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+        <tr>
+          <td class="controller-name">
+            <div class="en-name">unblockCarModel</div>
+            <div class="ru-name">Разблокировка</div>
+          </td>
+          <td class="role-badge">Admin</td>
+          <td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="inactive"></td><td class="active"><div class="dot"></div></td>
+        </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    
+    </div>
+
+    <script>
+        function openTab(tabId, element) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+
+            document.getElementById(tabId).classList.add('active');
+            element.classList.add('active');
+        }
+    </script>
+</body>
+</html>
