@@ -7,6 +7,7 @@ const router = Router();
 
 router.post("/", driverController.createDriver);
 router.post("/login", driverController.loginDriver);
+router.get("/me", authDriver, getDriverProfile);
 
 router.get("/", driverController.getDrivers);
 router.get("/:id", driverController.getDriverById);
@@ -15,6 +16,5 @@ router.delete("/:id", driverController.deleteDriver);
 
 router.patch("/:id/status", driverController.changeDriverStatus);
 router.patch("/:id/work-type", driverController.changeDriverWorkType);
-router.get("/me", authDriver, getDriverProfile);
 
 export default router;

@@ -293,7 +293,8 @@ export const deleteDriver = async (req, res) => {
 
 export const getDriverProfile = async (req, res) => {
   try {
-    const driverId = req.user?.id; // поправь под свой auth, если нужно
+    // 👉 ID всегда только из токена, который распаковал authDriver
+    const driverId = req.user?.id;
 
     if (!driverId) {
       return res.status(401).json({ message: "Не авторизован" });
