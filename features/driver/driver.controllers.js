@@ -290,3 +290,76 @@ export const deleteDriver = async (req, res) => {
   await driver.destroy();
   res.json({ message: "Удалён" });
 };
+
+export const getDriverProfile = async (req, res) => {
+  try {
+    const driverId = req.user?.id; // поправь под свой auth, если нужно
+
+    if (!driverId) {
+      return res.status(401).json({ message: "Не авторизован" });
+    }
+
+    const driver = await Driver.findByPk(driverId, {
+      attributes: [
+        "id",
+        "firstName",
+        "lastName",
+        "middleName",
+        "phone",
+        "status",
+        "isOnline",
+        "workType",
+        "rating",
+        "balance",
+        "level",
+        "priorityScore",
+        "vehicleId",
+      ],
+      include: [
+        {
+          model: Vehicle,
+          as: "vehicle",
+          attributes: [
+            "id",
+            "type",
+            "brand",
+            "model",
+            "color",
+            "licensePlate",
+            "status",
+          ],
+        },
+      ],
+    });
+
+    if (!driver) {
+      return res.status(404).json({ message: "Водитель не найден" });
+    }
+
+    const fullName = [driver.lastName, driver.firstName, driver.middleName]
+      .filter(Boolean)
+      .join(" ");
+
+    return res.json({
+      id: driver.id,
+      fullName,
+      phone: driver.phone,
+
+      status: driver.status,
+      isOnline: driver.isOnline,
+      workType: driver.workType,
+
+      rating: driver.rating,
+      balance: driver.balance,
+      level: driver.level,
+      priorityScore: driver.priorityScore,
+
+      vehicle: driver.vehicle || null,
+    });
+  } catch (e) {
+    console.error("❌ getDriverProfile error:", e);
+    return res
+      .status(500)
+      .json({ message: "Ошибка получения профиля водителя" });
+  }
+};

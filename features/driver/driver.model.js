@@ -1,3 +1,5 @@
+import Vehicle from "../vehicle/vehicle.model.js";
+
 /**
  * @map_model Driver
  * @field id {UUID} - Уникальный ID водителя
@@ -60,7 +62,7 @@ const Driver = sequelize.define(
       allowNull: true,
       unique: true,
     },
-    // 👇 ДОБАВЛЕНО ПОЛЕ ПАСПОРТА
+    // 👇 ПАСПОРТ
     passportNumber: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -116,6 +118,29 @@ const Driver = sequelize.define(
       allowNull: false,
     },
 
+    // Уровень водителя (Новичок / Опытный / Профи)
+    level: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "novice", // novice | experienced | pro
+      field: "level",
+    },
+
+    // Приоритет (для "+10", "+30" и т.п.)
+    priorityScore: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: "priority_score",
+    },
+
+    // Когда последний раз обновляли уровень
+    levelUpdatedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "level_updated_at",
+    },
+
     // Статус как строка (вместо ENUM)
     status: {
       type: DataTypes.STRING,
@@ -127,6 +152,12 @@ const Driver = sequelize.define(
           msg: "Недопустимый статус водителя",
         },
       },
+    },
+    vehicleId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "vehicle_id",
+      // references: { model: "vehicles", key: "id" }, // можно добавить, если хочешь FK на уровне БД
     },
 
     // Тип работы как строка (вместо ENUM)
@@ -189,8 +220,12 @@ const Driver = sequelize.define(
       { unique: true, fields: ["passport_number"] },
       { fields: ["status", "is_online"] },
       { fields: ["work_type"] },
+      // при желании можно добавить индекс по уровню
+      // { fields: ["level"] },
     ],
   }
 );
+
+Driver.belongsTo(Vehicle, { as: "vehicle" });
 
 export default Driver;
