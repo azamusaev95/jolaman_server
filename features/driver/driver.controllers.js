@@ -2,6 +2,7 @@ import Driver from "./driver.model.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { Op } from "sequelize";
+import Vehicle from "../vehicle/vehicle.model.js";
 
 const STRICT_LICENSE_ROLES = ["taxi", "courier_auto", "truck"];
 
