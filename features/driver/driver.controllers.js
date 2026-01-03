@@ -99,8 +99,7 @@ export const createDriver = async (req, res) => {
 
 const normalizePhone = (value) => {
   if (!value) return value;
-  // Оставляем только цифры
-  return value.replace(/\D/g, "");
+  return value.replace(/\D/g, ""); // " +996 550 000 002 " -> "996550000002"
 };
 
 export const loginDriver = async (req, res) => {
@@ -113,15 +112,27 @@ export const loginDriver = async (req, res) => {
 
     const normalizedPhone = normalizePhone(phone);
 
+    // варианты формата телефона, под которые будем искать в БД
+    const phoneVariants = [
+      normalizedPhone, // "996550000002"
+      `+${normalizedPhone}`, // "+996550000002" — как у тебя сейчас в БД
+    ];
+
     console.log("[LOGIN_DRIVER] login_attempt", {
       phoneRaw: phone,
       phoneNormalized: normalizedPhone,
+      phoneVariants,
     });
 
-    const driver = await Driver.findOne({ where: { phone: normalizedPhone } });
+    const driver = await Driver.findOne({
+      where: {
+        phone: phoneVariants, // Sequelize сам сделает phone IN (...)
+      },
+    });
 
     if (!driver) {
       console.log("[LOGIN_DRIVER] driver_not_found", {
+        phoneRaw: phone,
         phoneNormalized: normalizedPhone,
       });
       return res.status(401).json({ message: "Неверные данные" });
