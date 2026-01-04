@@ -114,11 +114,7 @@ export const loginDriver = async (req, res) => {
 
     const normalizedPhone = normalizePhone(phone);
 
-    // варианты формата телефона, под которые будем искать в БД
-    const phoneVariants = [
-      normalizedPhone, // "996550000002"
-      `+${normalizedPhone}`, // "+996550000002" — как у тебя сейчас в БД
-    ];
+    const phoneVariants = [normalizedPhone, `+${normalizedPhone}`];
 
     console.log("[LOGIN_DRIVER] login_attempt", {
       phoneRaw: phone,
@@ -128,7 +124,7 @@ export const loginDriver = async (req, res) => {
 
     const driver = await Driver.findOne({
       where: {
-        phone: phoneVariants, // Sequelize сам сделает phone IN (...)
+        phone: phoneVariants,
       },
     });
 
@@ -157,11 +153,10 @@ export const loginDriver = async (req, res) => {
       return res.status(403).json({ message: "Доступ запрещён" });
     }
 
-    const token = jwt.sign(
-      { id: driver.id, role: "driver" },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
+    // 👉 токен только с id (без role)
+    const token = jwt.sign({ id: driver.id }, process.env.JWT_SECRET, {
+      expiresIn: "30d",
+    });
 
     const { passwordHash, ...data } = driver.toJSON();
 
@@ -169,13 +164,15 @@ export const loginDriver = async (req, res) => {
       driverId: driver.id,
     });
 
-    return res.json({ token, driver: data });
+    return res.json({
+      token,
+      driver: data,
+    });
   } catch (e) {
     console.error("[LOGIN_DRIVER] error", e);
     return res.status(500).json({ message: "Ошибка входа" });
   }
 };
-
 export const getDrivers = async (req, res) => {
   try {
     const { page = 1, limit = 10, q, status, workType, isOnline } = req.query;
