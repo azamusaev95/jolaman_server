@@ -107,88 +107,77 @@ export const getMyDriverRatingStats = async (req, res) => {
   try {
     const driverId = req.user?.id;
 
-    const BASE_REVIEWS = 150;
-    const BASE_SCORE = 5;
+    if (!driverId) {
+      return res.status(401).json({ error: "Не авторизован" });
+    }
 
+    // 🧮 Параметры рейтинга
+    const WINDOW_SIZE = 300; // учитываем только последние 300 отзывов
+    const BASE_COUNT = 150; // виртуальные "подарочные" оценки
+    const BASE_SCORE = 5; // все они = 5★
+
+    // Базовый фильтр по отзывам
     const where = {
       targetId: driverId,
       targetRole: "driver",
     };
 
+    // Если есть поле status — считаем только активные отзывы
     if (Review.rawAttributes?.status) {
       where.status = "active";
     }
 
-    // 1) Группировка по реальным отзывам
-    const grouped = await Review.findAll({
+    // 1) Берём последние 300 отзывов по createdAt DESC
+    const reviews = await Review.findAll({
       where,
-      attributes: [
-        "score",
-        [sequelize.fn("COUNT", sequelize.col("score")), "count"],
-      ],
-      group: ["score"],
-      order: [["score", "DESC"]],
+      order: [["createdAt", "DESC"]],
+      limit: WINDOW_SIZE,
     });
 
-    // 2) Реальные counts
-    const realCounts = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    // 2) Считаем распределение по звёздам и сумму
+    const countsByScore = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
 
-    grouped.forEach((row) => {
-      const score = Number(row.get("score"));
-      const count = Number(row.get("count"));
-      if (realCounts[score] !== undefined) {
-        realCounts[score] = count;
+    let sumScores = 0;
+
+    for (const r of reviews) {
+      const score = Number(r.score);
+      if (countsByScore[score] !== undefined) {
+        countsByScore[score] += 1;
+        sumScores += score;
       }
-    });
-
-    const realTotal = Object.values(realCounts).reduce((a, b) => a + b, 0);
-
-    // 3) Реальное среднее
-    let averageRaw = null;
-
-    if (realTotal > 0) {
-      const sum =
-        realCounts[5] * 5 +
-        realCounts[4] * 4 +
-        realCounts[3] * 3 +
-        realCounts[2] * 2 +
-        realCounts[1] * 1;
-
-      averageRaw = Number((sum / realTotal).toFixed(2));
     }
 
-    // 4) Добавляем виртуальные 150 x 5⭐
-    const countsByScore = {
-      5: realCounts[5] + BASE_REVIEWS,
-      4: realCounts[4],
-      3: realCounts[3],
-      2: realCounts[2],
-      1: realCounts[1],
-    };
+    const realTotal = reviews.length;
 
-    const total = realTotal + BASE_REVIEWS;
+    // 3) Реальное среднее по окну (без подарочных 150×5)
+    const averageRaw =
+      realTotal > 0 ? Number((sumScores / realTotal).toFixed(2)) : null;
 
-    // 5) Сглаженное среднее (как на фронте и в дашборде)
-    const shownAvg =
-      ((averageRaw ?? BASE_SCORE) * realTotal + BASE_SCORE * BASE_REVIEWS) /
-      (realTotal + BASE_REVIEWS);
+    // 4) Сглаженный рейтинг с учётом базы 150×5
+    let average;
 
-    const average = Number(shownAvg.toFixed(2));
+    if (realTotal === 0) {
+      // Нет реальных отзывов — показываем чистые 5.0
+      average = BASE_SCORE;
+    } else {
+      const blended =
+        (sumScores + BASE_SCORE * BASE_COUNT) / (realTotal + BASE_COUNT);
+      average = Number(blended.toFixed(2));
+    }
 
     return res.json({
       success: true,
 
-      // финальные цифры для UI
-      total,
-      average,
-      countsByScore,
+      // цифры для UI
+      total: realTotal, // реальное число отзывов в окне (0..300)
+      average, // сглаженный рейтинг с базой 150×5
+      countsByScore, // распределение по 1–5 в окне
 
-      // полезные поля на будущее
-      realTotal,
-      averageRaw,
-      baseApplied: true,
+      // тех/аналитика на будущее
+      averageRaw, // реальное среднее по окну (без базы)
+      windowSize: WINDOW_SIZE,
       baseScore: BASE_SCORE,
-      baseCount: BASE_REVIEWS,
+      baseCount: BASE_COUNT,
     });
   } catch (e) {
     console.error("[RATING_STATS_ERROR]", {
