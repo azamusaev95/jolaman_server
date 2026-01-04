@@ -102,3 +102,66 @@ export const deleteReview = async (req, res) => {
     res.status(500).json({ error: "Ошибка сервера" });
   }
 };
+
+// @map: getMyDriverRatingStats (Статистика рейтинга водителя) [Driver only]
+export const getMyDriverRatingStats = async (req, res) => {
+  try {
+    const driverId = req.user.id; // берем из токена
+
+    // 1) Группировка по score
+    const grouped = await Review.findAll({
+      where: {
+        targetId: driverId,
+        targetRole: "driver",
+      },
+      attributes: [
+        "score",
+        [sequelize.fn("COUNT", sequelize.col("score")), "count"],
+      ],
+      group: ["score"],
+      order: [["score", "DESC"]],
+    });
+
+    // 2) Считаем total
+    const total = grouped.reduce(
+      (acc, row) => acc + Number(row.get("count")),
+      0
+    );
+
+    // 3) Средний рейтинг
+    const avgRow = await Review.findOne({
+      where: {
+        targetId: driverId,
+        targetRole: "driver",
+      },
+      attributes: [[sequelize.fn("AVG", sequelize.col("score")), "avgRating"]],
+    });
+
+    const average = avgRow?.get("avgRating")
+      ? Number(parseFloat(avgRow.get("avgRating")).toFixed(2))
+      : null;
+
+    // 4) Нормализуем формат { 5: x, 4: y, ... }
+    const countsByScore = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+
+    grouped.forEach((row) => {
+      const score = Number(row.get("score"));
+      const count = Number(row.get("count"));
+      if (countsByScore[score] !== undefined) {
+        countsByScore[score] = count;
+      }
+    });
+
+    return res.json({
+      success: true,
+      total,
+      average,
+      countsByScore,
+    });
+  } catch (e) {
+    console.error("getMyDriverRatingStats error:", e);
+    return res.status(500).json({
+      error: "Ошибка сервера при получении статистики рейтинга",
+    });
+  }
+};

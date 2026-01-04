@@ -5,7 +5,9 @@ import {
   createReview,
   getReviewsByTarget,
   deleteReview,
+  getMyDriverRatingStats,
 } from "./review.controller.js";
+import { authDriver } from "../middlwares/authDriver.js";
 
 const router = Router();
 
@@ -20,5 +22,7 @@ router.get("/", getReviewsByTarget);
 // 3. Удалить отзыв (админка)
 // DELETE /api/reviews/:id
 router.delete("/:id", deleteReview);
+
+router.get("/my-rating/stats", authDriver, getMyDriverRatingStats);
 
 export default router;

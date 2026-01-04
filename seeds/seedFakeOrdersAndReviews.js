@@ -40,24 +40,45 @@ function addRatingStat(map, id, score) {
 async function seedFakeOrdersAndReviews() {
   console.log("🚀 Запуск сидера: фейковые заказы и рейтинги...");
 
-  await sequelize.authenticate();
-  console.log("✅ Подключение к БД OK");
+  try {
+    await sequelize.authenticate();
+    console.log("✅ Подключение к БД OK");
+  } catch (err) {
+    console.error("❌ Не удалось подключиться к БД:", err.message);
+    console.error(err);
+    process.exit(1);
+  }
 
-  // ⚠️ ВАЖНО: здесь я НЕ вызываю sequelize.sync({ force: true }),
-  // чтобы случайно не уронить схему БД. Предполагается, что таблицы уже существуют.
+  // ⚠️ Предполагается, что таблицы уже созданы миграциями / sync в другом месте
 
-  const drivers = await Driver.findAll();
-  const clients = await Client.findAll();
-  const tariffs = await Tariff.findAll();
+  let drivers;
+  let clients;
+  let tariffs;
+
+  try {
+    drivers = await Driver.findAll();
+    clients = await Client.findAll();
+    tariffs = await Tariff.findAll();
+  } catch (err) {
+    console.error(
+      "❌ Ошибка при загрузке базовых данных (Driver/Client/Tariff):",
+      err.message
+    );
+    console.error(err);
+    process.exit(1);
+  }
 
   if (!drivers.length) {
-    throw new Error("Нет водителей в БД (таблица drivers пуста)");
+    console.error("❌ Нет водителей в БД (таблица drivers пуста)");
+    process.exit(1);
   }
   if (!clients.length) {
-    throw new Error("Нет клиентов в БД (таблица clients пуста)");
+    console.error("❌ Нет клиентов в БД (таблица clients пуста)");
+    process.exit(1);
   }
   if (!tariffs.length) {
-    throw new Error("Нет тарифов в БД (таблица tariffs пуста)");
+    console.error("❌ Нет тарифов в БД (таблица tariffs пуста)");
+    process.exit(1);
   }
 
   console.log(
@@ -71,12 +92,30 @@ async function seedFakeOrdersAndReviews() {
   const driverRatingStats = new Map(); // driverId -> { sum, count }
   const clientRatingStats = new Map(); // clientId -> { sum, count }
 
+  // Счётчики для логов
+  let createdOrdersCount = 0;
+  let createdReviewsCount = 0;
+
   // Можно всё обернуть в транзакцию, чтобы сидер был атомарным
   const transaction = await sequelize.transaction();
 
   try {
-    for (const driver of drivers) {
-      for (let i = 0; i < ORDERS_PER_DRIVER; i++) {
+    // --- Основной цикл по водителям ---
+    for (let driverIndex = 0; driverIndex < drivers.length; driverIndex++) {
+      const driver = drivers[driverIndex];
+
+      console.log(
+        `\n👨‍✈️ Водитель ${driverIndex + 1}/${drivers.length} — id=${driver.id}`
+      );
+
+      // Для каждого водителя создаём N заказов
+      for (let orderIndex = 0; orderIndex < ORDERS_PER_DRIVER; orderIndex++) {
+        console.log(
+          `  📦 Заказ ${
+            orderIndex + 1
+          }/${ORDERS_PER_DRIVER} для этого водителя...`
+        );
+
         // случайный клиент
         const client = clients[randomInt(0, clients.length - 1)];
         // случайный тариф
@@ -144,6 +183,9 @@ async function seedFakeOrdersAndReviews() {
           { transaction }
         );
 
+        createdOrdersCount += 1;
+        console.log(`    ✅ Order created: id=${order.id}`);
+
         // --- Генерируем оценки (1–5) ---
         // Сделаем более реалистичное распределение: в основном 4–5, иногда 3, редко 1–2
         function generateScore() {
@@ -159,7 +201,7 @@ async function seedFakeOrdersAndReviews() {
         const scoreForClient = generateScore();
 
         // --- Отзыв клиента о водителе ---
-        await Review.create(
+        const driverReview = await Review.create(
           {
             orderId: order.id,
             reviewerId: client.id,
@@ -170,10 +212,14 @@ async function seedFakeOrdersAndReviews() {
           },
           { transaction }
         );
+        createdReviewsCount += 1;
         addRatingStat(driverRatingStats, driver.id, scoreForDriver);
+        console.log(
+          `    ⭐ Review for driver created: id=${driverReview.id}, score=${scoreForDriver}`
+        );
 
         // --- (Опционально) отзыв водителя о клиенте ---
-        await Review.create(
+        const clientReview = await Review.create(
           {
             orderId: order.id,
             reviewerId: driver.id,
@@ -184,16 +230,27 @@ async function seedFakeOrdersAndReviews() {
           },
           { transaction }
         );
+        createdReviewsCount += 1;
         addRatingStat(clientRatingStats, client.id, scoreForClient);
+        console.log(
+          `    ⭐ Review for client created: id=${clientReview.id}, score=${scoreForClient}`
+        );
       }
+
+      console.log(
+        `  ✅ Водитель ${driver.id}: создано ${ORDERS_PER_DRIVER} заказов`
+      );
     }
 
-    console.log("🧮 Расчёт рейтингов по собранной статистике...");
+    console.log("\n🧮 Расчёт рейтингов по собранной статистике...");
 
     // --- Обновляем рейтинг водителей ---
     for (const [driverId, { sum, count }] of driverRatingStats.entries()) {
       const avg = sum / count;
       const rounded = Number(avg.toFixed(2));
+      console.log(
+        `  🔁 Обновляем рейтинг водителя ${driverId}: avg=${rounded} (по ${count} отзывам)`
+      );
       await Driver.update(
         { rating: rounded },
         { where: { id: driverId }, transaction }
@@ -204,6 +261,9 @@ async function seedFakeOrdersAndReviews() {
     for (const [clientId, { sum, count }] of clientRatingStats.entries()) {
       const avg = sum / count;
       const rounded = Number(avg.toFixed(2));
+      console.log(
+        `  🔁 Обновляем рейтинг клиента ${clientId}: avg=${rounded} (по ${count} отзывам)`
+      );
       await Client.update(
         { rating: rounded },
         { where: { id: clientId }, transaction }
@@ -211,14 +271,30 @@ async function seedFakeOrdersAndReviews() {
     }
 
     await transaction.commit();
-    console.log("✅ Сидирование успешно завершено");
+
+    console.log("\n✅ Сидирование успешно завершено");
+    console.log(`   ➤ Всего создано заказов: ${createdOrdersCount}`);
+    console.log(`   ➤ Всего создано отзывов: ${createdReviewsCount}`);
   } catch (error) {
-    console.error("❌ Ошибка при сидировании:", error);
-    await transaction.rollback();
+    console.error("\n❌ Ошибка при сидировании:", error.message);
+    console.error(error);
+    try {
+      await transaction.rollback();
+      console.log("↩️ Транзакция откатена");
+    } catch (rollbackErr) {
+      console.error("❌ Ошибка при откате транзакции:", rollbackErr.message);
+      console.error(rollbackErr);
+    }
     process.exit(1);
   }
 
-  await sequelize.close();
+  try {
+    await sequelize.close();
+    console.log("🔌 Соединение с БД закрыто");
+  } catch (closeErr) {
+    console.error("⚠️ Ошибка при закрытии соединения с БД:", closeErr.message);
+  }
+
   process.exit(0);
 }
 

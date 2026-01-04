@@ -1,6 +1,6 @@
 import { Router } from "express";
 import * as driverController from "./driver.controllers.js";
-import { authDriver } from "./authDriver.js";
+import { authDriver } from "../middlwares/authDriver.js";
 import { getDriverProfile } from "./driver.controllers.js";
 
 const router = Router();
