@@ -106,7 +106,7 @@ export const deleteReview = async (req, res) => {
 // @map: getMyDriverRatingStats (Статистика рейтинга водителя) [Driver only]
 export const getMyDriverRatingStats = async (req, res) => {
   try {
-    const driverId = req.user.id; // берем из токена
+    const driverId = req.user?.id;
 
     // 1) Группировка по score
     const grouped = await Review.findAll({
@@ -159,7 +159,19 @@ export const getMyDriverRatingStats = async (req, res) => {
       countsByScore,
     });
   } catch (e) {
-    console.error("getMyDriverRatingStats error:", e);
+    // ==============================
+    //   🔥 СТРУКТУРИРОВАННЫЙ ERROR LOG
+    // ==============================
+    console.error("[RATING_STATS_ERROR]", {
+      route: "GET /reviews/my-rating/stats",
+      driverId: req?.user?.id || null,
+      type: e?.name || "UNEXPECTED_ERROR",
+      message: e?.message,
+      sqlMessage: e?.original?.sqlMessage,
+      stack: e?.stack,
+      timestamp: new Date().toISOString(),
+    });
+
     return res.status(500).json({
       error: "Ошибка сервера при получении статистики рейтинга",
     });
