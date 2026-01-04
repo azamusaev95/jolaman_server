@@ -106,21 +106,20 @@ export const deleteReview = async (req, res) => {
 export const getMyDriverRatingStats = async (req, res) => {
   try {
     const driverId = req.user?.id;
+
     const BASE_REVIEWS = 150;
     const BASE_SCORE = 5;
 
-    // Базовый where для отзывов по водителю
     const where = {
       targetId: driverId,
       targetRole: "driver",
     };
 
-    // Если в модели Review есть поле status — учитываем только активные отзывы
     if (Review.rawAttributes?.status) {
       where.status = "active";
     }
 
-    // 1) Группировка по score
+    // 1) Группировка по реальным отзывам
     const grouped = await Review.findAll({
       where,
       attributes: [
@@ -131,57 +130,67 @@ export const getMyDriverRatingStats = async (req, res) => {
       order: [["score", "DESC"]],
     });
 
-    // 2) Считаем total (реальное количество отзывов)
-    const total = grouped.reduce(
-      (acc, row) => acc + Number(row.get("count")),
-      0
-    );
-
-    // 3) Средний рейтинг (реальный, без 150 пятёрок)
-    const avgRow = await Review.findOne({
-      where,
-      attributes: [[sequelize.fn("AVG", sequelize.col("score")), "avgRating"]],
-    });
-
-    const averageRaw = avgRow?.get("avgRating")
-      ? Number(parseFloat(avgRow.get("avgRating")).toFixed(2))
-      : null;
-
-    // 3.1) Сглаженный рейтинг с "виртуальными" 150 пятёрками
-    let average;
-
-    if (total > 0 && averageRaw != null) {
-      const shownAvg =
-        (averageRaw * total + BASE_SCORE * BASE_REVIEWS) /
-        (total + BASE_REVIEWS);
-      average = Number(shownAvg.toFixed(2));
-    } else {
-      // Нет реальных отзывов — считаем, что стартует с 5.0
-      average = BASE_SCORE;
-    }
-
-    // 4) Нормализуем формат { 5: x, 4: y, ... }
-    const countsByScore = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    // 2) Реальные counts
+    const realCounts = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
 
     grouped.forEach((row) => {
       const score = Number(row.get("score"));
       const count = Number(row.get("count"));
-      if (countsByScore[score] !== undefined) {
-        countsByScore[score] = count;
+      if (realCounts[score] !== undefined) {
+        realCounts[score] = count;
       }
     });
 
+    const realTotal = Object.values(realCounts).reduce((a, b) => a + b, 0);
+
+    // 3) Реальное среднее
+    let averageRaw = null;
+
+    if (realTotal > 0) {
+      const sum =
+        realCounts[5] * 5 +
+        realCounts[4] * 4 +
+        realCounts[3] * 3 +
+        realCounts[2] * 2 +
+        realCounts[1] * 1;
+
+      averageRaw = Number((sum / realTotal).toFixed(2));
+    }
+
+    // 4) Добавляем виртуальные 150 x 5⭐
+    const countsByScore = {
+      5: realCounts[5] + BASE_REVIEWS,
+      4: realCounts[4],
+      3: realCounts[3],
+      2: realCounts[2],
+      1: realCounts[1],
+    };
+
+    const total = realTotal + BASE_REVIEWS;
+
+    // 5) Сглаженное среднее (как на фронте и в дашборде)
+    const shownAvg =
+      ((averageRaw ?? BASE_SCORE) * realTotal + BASE_SCORE * BASE_REVIEWS) /
+      (realTotal + BASE_REVIEWS);
+
+    const average = Number(shownAvg.toFixed(2));
+
     return res.json({
       success: true,
-      total, // реальное число отзывов
-      average, // сглаженный рейтинг с учётом 150×5
-      averageRaw, // реальное среднее по отзывам (можно пока не использовать на фронте)
-      countsByScore, // распределение только по реальным отзывам
+
+      // финальные цифры для UI
+      total,
+      average,
+      countsByScore,
+
+      // полезные поля на будущее
+      realTotal,
+      averageRaw,
+      baseApplied: true,
+      baseScore: BASE_SCORE,
+      baseCount: BASE_REVIEWS,
     });
   } catch (e) {
-    // ==============================
-    //   🔥 СТРУКТУРИРОВАННЫЙ ERROR LOG
-    // ==============================
     console.error("[RATING_STATS_ERROR]", {
       route: "GET /reviews/my-rating/stats",
       driverId: req?.user?.id || null,
