@@ -18,6 +18,7 @@ import driverTransaction from "./features/driverTransaction/transaction.routes.j
 
 // 👇 НОВЫЙ ИМПОРТ: ЗАЯВКИ ВОДИТЕЛЕЙ
 import driverApplicationRoutes from "./features/driverApplication/driverApplication.routes.js";
+import reviewRoutes from "./features/review/review.routes.js";
 
 const app = express();
 
@@ -43,6 +44,7 @@ app.use("/api/transactions", driverTransaction);
 
 // 👇 НОВЫЙ РОУТ: ЗАЯВКИ
 app.use("/api/driver-applications", driverApplicationRoutes);
+app.use("/api/review", reviewRoutes);
 
 const PORT = process.env.PORT || 8787;
 

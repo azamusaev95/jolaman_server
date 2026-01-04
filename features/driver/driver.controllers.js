@@ -100,7 +100,8 @@ export const createDriver = async (req, res) => {
 
 const normalizePhone = (value) => {
   if (!value) return value;
-  return value.replace(/\D/g, ""); // " +996 550 000 002 " -> "996550000002"
+  // Оставляем только цифры и плюс: " +996 550 000 002 " -> "+996550000002"
+  return value.replace(/[^\d+]/g, "");
 };
 
 export const loginDriver = async (req, res) => {
