@@ -44,7 +44,7 @@ app.use("/api/transactions", driverTransaction);
 
 // 👇 НОВЫЙ РОУТ: ЗАЯВКИ
 app.use("/api/driver-applications", driverApplicationRoutes);
-app.use("/api/review", reviewRoutes);
+app.use("/api/reviews", reviewRoutes);
 
 const PORT = process.env.PORT || 8787;
 
