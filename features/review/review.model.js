@@ -7,6 +7,7 @@
  * @field targetRole {Enum} - Роль получателя (driver, client)
  * @field score {Integer} - Оценка (1-5)
  * @field comment {Text} - Текст комментария
+ * @field status {String} - active | amnestied
  */
 
 import { DataTypes } from "sequelize";
@@ -61,6 +62,19 @@ const Review = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true,
     },
+
+    // 🔹 Новый статус отзыва
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "active",
+      validate: {
+        isIn: {
+          args: [["active", "amnestied"]],
+          msg: "Invalid review status",
+        },
+      },
+    },
   },
   {
     tableName: "reviews",
@@ -69,6 +83,8 @@ const Review = sequelize.define(
     indexes: [
       { fields: ["target_id", "target_role"] },
       { fields: ["order_id"] },
+      // 👉 при росте объёма можно добавить:
+      // { fields: ["status"] }
     ],
   }
 );

@@ -103,17 +103,26 @@ export const deleteReview = async (req, res) => {
   }
 };
 
-// @map: getMyDriverRatingStats (Статистика рейтинга водителя) [Driver only]
 export const getMyDriverRatingStats = async (req, res) => {
   try {
     const driverId = req.user?.id;
+    const BASE_REVIEWS = 150;
+    const BASE_SCORE = 5;
+
+    // Базовый where для отзывов по водителю
+    const where = {
+      targetId: driverId,
+      targetRole: "driver",
+    };
+
+    // Если в модели Review есть поле status — учитываем только активные отзывы
+    if (Review.rawAttributes?.status) {
+      where.status = "active";
+    }
 
     // 1) Группировка по score
     const grouped = await Review.findAll({
-      where: {
-        targetId: driverId,
-        targetRole: "driver",
-      },
+      where,
       attributes: [
         "score",
         [sequelize.fn("COUNT", sequelize.col("score")), "count"],
@@ -122,24 +131,34 @@ export const getMyDriverRatingStats = async (req, res) => {
       order: [["score", "DESC"]],
     });
 
-    // 2) Считаем total
+    // 2) Считаем total (реальное количество отзывов)
     const total = grouped.reduce(
       (acc, row) => acc + Number(row.get("count")),
       0
     );
 
-    // 3) Средний рейтинг
+    // 3) Средний рейтинг (реальный, без 150 пятёрок)
     const avgRow = await Review.findOne({
-      where: {
-        targetId: driverId,
-        targetRole: "driver",
-      },
+      where,
       attributes: [[sequelize.fn("AVG", sequelize.col("score")), "avgRating"]],
     });
 
-    const average = avgRow?.get("avgRating")
+    const averageRaw = avgRow?.get("avgRating")
       ? Number(parseFloat(avgRow.get("avgRating")).toFixed(2))
       : null;
+
+    // 3.1) Сглаженный рейтинг с "виртуальными" 150 пятёрками
+    let average;
+
+    if (total > 0 && averageRaw != null) {
+      const shownAvg =
+        (averageRaw * total + BASE_SCORE * BASE_REVIEWS) /
+        (total + BASE_REVIEWS);
+      average = Number(shownAvg.toFixed(2));
+    } else {
+      // Нет реальных отзывов — считаем, что стартует с 5.0
+      average = BASE_SCORE;
+    }
 
     // 4) Нормализуем формат { 5: x, 4: y, ... }
     const countsByScore = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
@@ -154,9 +173,10 @@ export const getMyDriverRatingStats = async (req, res) => {
 
     return res.json({
       success: true,
-      total,
-      average,
-      countsByScore,
+      total, // реальное число отзывов
+      average, // сглаженный рейтинг с учётом 150×5
+      averageRaw, // реальное среднее по отзывам (можно пока не использовать на фронте)
+      countsByScore, // распределение только по реальным отзывам
     });
   } catch (e) {
     // ==============================
