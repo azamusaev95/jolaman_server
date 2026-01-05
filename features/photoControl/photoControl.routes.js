@@ -6,6 +6,7 @@ import {
   getPhotoControlById,
   updatePhotoControlStatus,
   checkPhotoControlForDriverAndVehicle,
+  createPhotoControl,
 } from "./photoControl.controller.js";
 // при необходимости можно подключить миддлвары авторизации
 // import { authDriver } from "../middlwares/authDriver.js";

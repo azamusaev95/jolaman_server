@@ -4,23 +4,56 @@ import {
   sendMessage,
   getChatMessages,
   getAllChats,
+  getDriverChats,
 } from "./chat.controller.js";
 
-// Если есть middleware авторизации, добавь их сюда
-// import { authMiddleware } from "../../middlewares/auth.middleware.js";
+// 🎯 при необходимости подключим разные миддлвары
+// import { authDriver } from "../middlewares/authDriver.js";
+// import { authAdmin } from "../middlewares/authAdmin.js";
 
 const router = Router();
 
-// Создать/Найти чат для заказа
-router.post("/order-chat", getOrCreateOrderChat);
+/*
+ * =============================
+ *   ЧАТЫ ДЛЯ ЗАКАЗА (DRIVER/CLIENT)
+ * =============================
+ */
 
-// Отправить сообщение в чат :id
-router.post("/:chatId/messages", sendMessage);
+// Создать или вернуть существующий чат по заказу
+// POST /api/chats/order
+router.post("/order", getOrCreateOrderChat);
 
-// Получить сообщения чата :id
+/*
+ * =============================
+ *   ЧАТЫ ВОДИТЕЛЯ (СПИСОК ДЛЯ МОБИЛКИ)
+ * =============================
+ */
+
+// GET /api/chats/driver
+// authDriver — позже подключим
+router.get("/driver", /* authDriver, */ getDriverChats);
+
+/*
+ * =============================
+ *   СООБЩЕНИЯ В ЧАТЕ
+ * =============================
+ */
+
+// Получить историю сообщений
+// GET /api/chats/:chatId/messages
 router.get("/:chatId/messages", getChatMessages);
 
-// Получить список чатов (для админки)
-router.get("/", getAllChats);
+// Отправить сообщение
+// POST /api/chats/:chatId/messages
+router.post("/:chatId/messages", sendMessage);
+
+/*
+ * =============================
+ *   СПИСОК ВСЕХ ЧАТОВ (АДМИН / ДИСПЕТЧЕР)
+ * =============================
+ */
+
+// GET /api/chats
+router.get("/", /* authAdmin, */ getAllChats);
 
 export default router;

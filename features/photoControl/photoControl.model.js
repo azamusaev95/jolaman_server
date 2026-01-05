@@ -4,8 +4,9 @@
  * @field driverId {UUID} - Ссылка на водителя
  * @field vehicleId {UUID} - Ссылка на автомобиль
  * @field date {Date} - Дата и время фотоконтроля
- * @field photos {JSON} - Массив ссылок на фото
+ * @field photos {JSON} - Объект со всеми обязательными ракурсами
  * @field status {String} - pending | approved | rejected
+ * @field rejectionReason {String} - Комментарий диспетчера
  */
 
 import { DataTypes } from "sequelize";
@@ -38,16 +39,45 @@ const PhotoControl = sequelize.define(
     date: {
       type: DataTypes.DATE,
       allowNull: false,
+      defaultValue: DataTypes.NOW,
     },
 
-    // Массив ссылок на фото (JSON: ["url1", "url2", ...] или объекты)
+    /**
+     * Поле photos теперь содержит строгую валидацию.
+     * Мы проверяем наличие всех 6 обязательных ракурсов перед сохранением.
+     */
     photos: {
       type: DataTypes.JSON,
       allowNull: false,
-      defaultValue: [],
+      validate: {
+        hasAllRequiredPhotos(value) {
+          const requiredKeys = [
+            "front", // спереди
+            "left", // слева
+            "right", // справа
+            "trunk", // багажник
+            "frontSeats", // передние сиденья
+            "backSeats", // задние сиденья
+          ];
+
+          if (!value || typeof value !== "object") {
+            throw new Error("Photos must be an object");
+          }
+
+          const missingKeys = requiredKeys.filter(
+            (key) => !value[key] || value[key].trim() === ""
+          );
+
+          if (missingKeys.length > 0) {
+            throw new Error(
+              `Missing required photos: ${missingKeys.join(", ")}`
+            );
+          }
+        },
+      },
     },
 
-    // Статус фотоконтроля: pending | approved | rejected
+    // Статус фотоконтроля
     status: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -59,6 +89,13 @@ const PhotoControl = sequelize.define(
         },
       },
     },
+
+    // Комментарий от диспетчера (обязателен, если статус rejected — можно настроить логику в хуках)
+    rejectionReason: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: "rejection_reason",
+    },
   },
   {
     tableName: "photo_controls",
@@ -68,8 +105,7 @@ const PhotoControl = sequelize.define(
       { fields: ["driver_id"] },
       { fields: ["vehicle_id"] },
       { fields: ["date"] },
-      // при необходимости:
-      // { fields: ["status"] },
+      { fields: ["status"] },
     ],
   }
 );

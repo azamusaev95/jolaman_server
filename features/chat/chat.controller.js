@@ -4,12 +4,29 @@ import Order from "../order/order.model.js";
 import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
 
+// === Константы TTL для авто-закрытия чатов ===
+const CHAT_TTL_HOURS = 4;
+const CHAT_TTL_MS = CHAT_TTL_HOURS * 60 * 60 * 1000;
+
+const isChatExpired = (lastActivity) => {
+  if (!lastActivity) return false;
+  const ts = new Date(lastActivity).getTime();
+  if (Number.isNaN(ts)) return false;
+  return Date.now() - ts > CHAT_TTL_MS;
+};
+
 // @map: getOrCreateOrderChat (Создать/Найти Чат) -> orderId, clientId, driverId, type, status [Public/Auth]
 export const getOrCreateOrderChat = async (req, res) => {
   try {
     const { orderId, clientId, driverId } = req.body;
 
-    // Ищем существующий чат
+    if (!orderId || !clientId || !driverId) {
+      return res.status(400).json({
+        message: "Нужно передать orderId, clientId и driverId",
+      });
+    }
+
+    // Ищем существующий чат по заказу
     let chat = await Chat.findOne({
       where: { orderId },
       include: [
@@ -24,7 +41,7 @@ export const getOrCreateOrderChat = async (req, res) => {
     });
 
     if (!chat) {
-      // Создаем новый
+      // Создаем новый чат под заказ
       const newChat = await Chat.create({
         type: "order",
         orderId,
@@ -33,7 +50,7 @@ export const getOrCreateOrderChat = async (req, res) => {
         status: "active",
       });
 
-      // Перезагружаем с данными
+      // Перезагружаем с данными связей
       chat = await Chat.findByPk(newChat.id, {
         include: [
           { model: Client, as: "client", attributes: ["name", "phone"] },
@@ -60,6 +77,39 @@ export const sendMessage = async (req, res) => {
     const { chatId } = req.params;
     const { senderId, senderRole, content, contentType = "text" } = req.body;
 
+    if (!chatId) {
+      return res.status(400).json({ message: "Не передан chatId" });
+    }
+    if (!senderId || !senderRole || !content) {
+      return res.status(400).json({
+        message: "Нужно передать senderId, senderRole и content",
+      });
+    }
+
+    // Находим чат
+    const chat = await Chat.findByPk(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: "Чат не найден" });
+    }
+
+    // Проверяем TTL (по updatedAt чата или последнему сообщению)
+    // Можно использовать только chat.updatedAt, так как мы его обновляем на каждый send
+    const lastActivity = chat.updatedAt || chat.createdAt;
+    const expired = isChatExpired(lastActivity);
+
+    if (expired || chat.status === "closed") {
+      // Если чат ещё не помечен как closed — пометим
+      if (chat.status !== "closed") {
+        await Chat.update({ status: "closed" }, { where: { id: chatId } });
+      }
+
+      return res.status(403).json({
+        message:
+          "Чат закрыт: прошло более 4 часов без активности. Новые сообщения отправить нельзя.",
+      });
+    }
+
+    // Чат ещё активен — создаём сообщение
     const message = await ChatMessage.create({
       chatId,
       senderId,
@@ -68,8 +118,11 @@ export const sendMessage = async (req, res) => {
       contentType,
     });
 
-    // Обновляем updatedAt у чата, чтобы он поднялся в списке
-    await Chat.update({ updatedAt: new Date() }, { where: { id: chatId } });
+    // Обновляем updatedAt и убеждаемся, что статус активный
+    await Chat.update(
+      { updatedAt: new Date(), status: "active" },
+      { where: { id: chatId } }
+    );
 
     return res.json(message);
   } catch (e) {
@@ -83,18 +136,39 @@ export const getChatMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
     const { page = 1, limit = 50 } = req.query;
-    const offset = (page - 1) * limit;
+
+    if (!chatId) {
+      return res.status(400).json({ message: "Не передан chatId" });
+    }
+
+    const chat = await Chat.findByPk(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: "Чат не найден" });
+    }
+
+    // Мягкая синхронизация статуса по TTL (историю смотреть можно всегда)
+    const expired = isChatExpired(chat.updatedAt || chat.createdAt);
+    if (expired && chat.status !== "closed") {
+      await Chat.update({ status: "closed" }, { where: { id: chatId } });
+    }
+
+    const numericLimit = Number(limit) || 50;
+    const numericPage = Number(page) || 1;
+    const offset = (numericPage - 1) * numericLimit;
 
     const messages = await ChatMessage.findAndCountAll({
       where: { chatId },
       order: [["createdAt", "ASC"]],
-      limit: Number(limit),
-      offset: Number(offset),
+      limit: numericLimit,
+      offset,
     });
 
     return res.json({
       items: messages.rows,
       total: messages.count,
+      page: numericPage,
+      limit: numericLimit,
+      chatStatus: expired ? "closed" : chat.status,
     });
   } catch (e) {
     console.error(e);
@@ -105,9 +179,10 @@ export const getChatMessages = async (req, res) => {
 // @map: getAllChats (Все Чаты) -> orderId, clientId, driverId, status [Admin/Dispatcher]
 export const getAllChats = async (req, res) => {
   try {
-    const { orderId } = req.query;
+    const { orderId, status } = req.query;
     const where = {};
     if (orderId) where.orderId = orderId;
+    if (status) where.status = status; // active | closed | ...
 
     const chats = await Chat.findAll({
       where,
@@ -133,5 +208,51 @@ export const getAllChats = async (req, res) => {
   } catch (e) {
     console.error("Error fetching chats:", e);
     res.status(500).json({ message: "Ошибка загрузки списка чатов" });
+  }
+};
+
+// @map: getDriverChats (Чаты конкретного водителя) -> driverId [Driver]
+export const getDriverChats = async (req, res) => {
+  try {
+    const driverId = req.user?.id;
+
+    if (!driverId) {
+      return res.status(401).json({ message: "Не авторизован" });
+    }
+
+    const { status } = req.query;
+
+    const where = {
+      driverId,
+      type: "order",
+    };
+    if (status) {
+      where.status = status; // active | closed
+    }
+
+    const chats = await Chat.findAll({
+      where,
+      include: [
+        {
+          model: ChatMessage,
+          as: "messages",
+          limit: 1,
+          order: [["createdAt", "DESC"]],
+        },
+        { model: Client, as: "client", attributes: ["name", "phone"] },
+        {
+          model: Driver,
+          as: "driver",
+          attributes: ["firstName", "lastName", "phone"],
+        },
+        { model: Order, as: "order", attributes: ["publicNumber", "status"] },
+      ],
+      order: [["updatedAt", "DESC"]],
+    });
+
+    return res.json(chats);
+  } catch (e) {
+    console.error("Error fetching driver chats:", e);
+    res.status(500).json({ message: "Ошибка загрузки списка чатов водителя" });
   }
 };

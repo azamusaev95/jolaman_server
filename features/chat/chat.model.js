@@ -1,12 +1,13 @@
 /**
  * @map_model Chat
  * @field id {UUID} - Уникальный ID чата
- * @field type {String} - Тип чата (обычно 'order' или 'support')
- * @field status {String} - Статус (active, closed, archived)
- * @field orderId {UUID} - Ссылка на Заказ
+ * @field type {String} - order | support | broadcast | system
+ * @field status {String} - active | closed | archived
+ * @field orderId {UUID} - Ссылка на Заказ (для типа order)
  * @field clientId {UUID} - Ссылка на Клиента
  * @field driverId {UUID} - Ссылка на Водителя
- * @field adminId {UUID} - Ссылка на Админа (если участвует)
+ * @field adminId {UUID} - Ссылка на Админа
+ * @field title {String} - Заголовок (например, "Акция: Бонус 10%")
  */
 
 import { DataTypes } from "sequelize";
@@ -26,14 +27,31 @@ const Chat = sequelize.define(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
+    /**
+     * order: Чат по конкретному заказу (Клиент <-> Водитель)
+     * support: Чат с техподдержкой (Водитель/Клиент <-> Админ)
+     * broadcast: Новости, бонусы, акции (Админ -> Всем) - ОТВЕТ ЗАПРЕЩЕН
+     * system: Личные уведомления (Система -> Водителю) - ОТВЕТ ЗАПРЕЩЕН
+     */
     type: {
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue: "order",
+      validate: {
+        isIn: [["order", "support", "broadcast", "system"]],
+      },
     },
     status: {
       type: DataTypes.STRING,
       defaultValue: "active",
+      validate: {
+        isIn: [["active", "closed", "archived"]],
+      },
+    },
+    // Заголовок для новостей или акций
+    title: {
+      type: DataTypes.STRING,
+      allowNull: true,
     },
     orderId: {
       type: DataTypes.UUID,
@@ -92,6 +110,6 @@ Chat.belongsTo(Driver, {
   as: "driver",
 });
 
-console.log("🔗 Chat Model: Связи инициализированы");
+console.log("🔗 Chat Model: Связи обновлены (broadcast/system типы добавлены)");
 
 export default Chat;

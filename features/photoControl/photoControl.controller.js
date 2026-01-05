@@ -3,6 +3,41 @@
 import { Op } from "sequelize";
 import PhotoControl from "./photoControl.model.js";
 
+// @map: createPhotoControl (Создание новой записи фотоконтроля водителем)
+export const createPhotoControl = async (req, res) => {
+  try {
+    const { driverId, vehicleId, photos } = req.body;
+
+    // Простая проверка на наличие обязательных полей перед попыткой сохранения
+    if (!driverId || !vehicleId || !photos) {
+      return res.status(400).json({
+        success: false,
+        error: "Необходимо передать driverId, vehicleId и объект photos",
+      });
+    }
+
+    const newControl = await PhotoControl.create({
+      driverId,
+      vehicleId,
+      photos,
+      date: new Date(),
+      status: "pending",
+    });
+
+    return res.status(201).json({
+      success: true,
+      photoControl: newControl,
+    });
+  } catch (e) {
+    console.error("Ошибка при создании фотоконтроля:", e);
+    // Sequelize вернет ошибку валидации, если в photos не хватает ракурсов
+    return res.status(400).json({
+      success: false,
+      error: e.message || "Ошибка при сохранении фотоконтроля",
+    });
+  }
+};
+
 // @map: getPhotoControls (Список фотоконтролей с фильтрами)
 export const getPhotoControls = async (req, res) => {
   try {
@@ -128,11 +163,11 @@ export const getPhotoControlById = async (req, res) => {
   }
 };
 
-// @map: updatePhotoControlStatus (Обновить статус фотоконтроля)
+// @map: updatePhotoControlStatus (Обновить статус фотоконтроля диспетчером)
 export const updatePhotoControlStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, rejectionReason } = req.body;
 
     const allowedStatuses = ["pending", "approved", "rejected"];
 
@@ -144,6 +179,17 @@ export const updatePhotoControlStatus = async (req, res) => {
       });
     }
 
+    // Логическая проверка: если статус rejected, должен быть комментарий
+    if (
+      status === "rejected" &&
+      (!rejectionReason || rejectionReason.trim() === "")
+    ) {
+      return res.status(400).json({
+        error:
+          "При отклонении фотоконтроля необходимо указать причину (rejectionReason)",
+      });
+    }
+
     const photoControl = await PhotoControl.findByPk(id);
 
     if (!photoControl) {
@@ -151,6 +197,14 @@ export const updatePhotoControlStatus = async (req, res) => {
     }
 
     photoControl.status = status;
+
+    // Если статус approved, очищаем причину отклонения (если была), иначе записываем новую
+    if (status === "approved") {
+      photoControl.rejectionReason = null;
+    } else if (status === "rejected") {
+      photoControl.rejectionReason = rejectionReason;
+    }
+
     await photoControl.save();
 
     return res.json({

@@ -20,6 +20,7 @@ import driverTransaction from "./features/driverTransaction/transaction.routes.j
 import driverApplicationRoutes from "./features/driverApplication/driverApplication.routes.js";
 import reviewRoutes from "./features/review/review.routes.js";
 import photoControlRoutes from "./features/photoControl/photoControl.routes.js";
+import selfieControlRoutes from "./features/selfieControl/selfieControl.routes.js";
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use("/api/transactions", driverTransaction);
 app.use("/api/driver-applications", driverApplicationRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("api/photo-control", photoControlRoutes);
+app.use("api/selfie-control", selfieControlRoutes);
 
 const PORT = process.env.PORT || 8787;
 
