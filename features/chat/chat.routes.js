@@ -6,6 +6,7 @@ import {
   getAllChats,
   getDriverChats,
 } from "./chat.controller.js";
+import { authDriver } from "../middlwares/authDriver.js";
 
 // 🎯 при необходимости подключим разные миддлвары
 // import { authDriver } from "../middlewares/authDriver.js";
@@ -31,7 +32,7 @@ router.post("/order", getOrCreateOrderChat);
 
 // GET /api/chats/driver
 // authDriver — позже подключим
-router.get("/driver", /* authDriver, */ getDriverChats);
+router.get("/driver", authDriver, getDriverChats);
 
 /*
  * =============================
