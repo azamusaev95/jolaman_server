@@ -19,6 +19,7 @@ import driverTransaction from "./features/driverTransaction/transaction.routes.j
 // 👇 НОВЫЙ ИМПОРТ: ЗАЯВКИ ВОДИТЕЛЕЙ
 import driverApplicationRoutes from "./features/driverApplication/driverApplication.routes.js";
 import reviewRoutes from "./features/review/review.routes.js";
+import photoControlRoutes from "./features/photoControl/photoControl.routes.js";
 
 const app = express();
 
@@ -45,6 +46,7 @@ app.use("/api/transactions", driverTransaction);
 // 👇 НОВЫЙ РОУТ: ЗАЯВКИ
 app.use("/api/driver-applications", driverApplicationRoutes);
 app.use("/api/reviews", reviewRoutes);
+app.use("api/photo-control", photoControlRoutes);
 
 const PORT = process.env.PORT || 8787;
 
