@@ -22,12 +22,11 @@ export const authDriver = (req, res, next) => {
 
     // ожидаем payload: { id, role: "driver" }
     if (payload.role !== "driver") {
-      return res
-        .status(403)
-        .json({ message: "Доступ только для водителей", role: payload.role });
-    }
-
-    // кладем в запрос компактный объект
+      return res.status(403).json({
+        message: `Доступ только для водителей ${payload}`,
+        role: payload,
+      });
+    } // кладем в запрос компактный объект
     req.user = {
       id: payload.id,
       role: payload.role,
