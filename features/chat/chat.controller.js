@@ -266,10 +266,7 @@ export const getDriverChats = async (req, res) => {
 
     // Временно возвращаем объект, чтобы точно увидеть структуру в Reactotron
     // Если всё ок, можешь вернуть обратно return res.json(chats);
-    return res.json({
-      debug_count: chats.length,
-      data: chats || [],
-    });
+    return res.json([]);
   } catch (e) {
     console.error("CRITICAL ERROR in getDriverChats:", e);
     res.status(500).json({
