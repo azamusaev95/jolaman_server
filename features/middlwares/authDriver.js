@@ -20,13 +20,6 @@ export const authDriver = (req, res, next) => {
       return res.status(401).json({ message: "Неверный или истёкший токен" });
     }
 
-    // ожидаем payload: { id, role: "driver" }
-    if (payload.role !== "driver") {
-      return res.status(403).json({
-        message: `Доступ только для водителей ${payload}`,
-        role: payload,
-      });
-    } // кладем в запрос компактный объект
     req.user = {
       id: payload.id,
       role: payload.role,
