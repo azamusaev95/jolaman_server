@@ -217,6 +217,7 @@ export const getDriverChats = async (req, res) => {
     const driverId = req.user?.id;
 
     if (!driverId) {
+      console.log("DEBUG: Driver ID not found in req.user");
       return res.status(401).json({ message: "Не авторизован" });
     }
 
@@ -226,9 +227,12 @@ export const getDriverChats = async (req, res) => {
       driverId,
       type: "order",
     };
+
     if (status) {
-      where.status = status; // active | closed
+      where.status = status;
     }
+
+    console.log("DEBUG: Searching chats with where clause:", where);
 
     const chats = await Chat.findAll({
       where,
@@ -239,22 +243,38 @@ export const getDriverChats = async (req, res) => {
           limit: 1,
           order: [["createdAt", "DESC"]],
         },
-        { model: Client, as: "client", attributes: ["name", "phone"] },
+        {
+          model: Client,
+          as: "client",
+          attributes: ["name", "phone"],
+        },
         {
           model: Driver,
           as: "driver",
           attributes: ["firstName", "lastName", "phone"],
         },
-        { model: Order, as: "order", attributes: ["publicNumber", "status"] },
+        {
+          model: Order,
+          as: "order",
+          attributes: ["publicNumber", "status"],
+        },
       ],
       order: [["updatedAt", "DESC"]],
     });
 
-    return res.json(chats);
+    console.log(`DEBUG: Found ${chats.length} chats`);
+
+    // Временно возвращаем объект, чтобы точно увидеть структуру в Reactotron
+    // Если всё ок, можешь вернуть обратно return res.json(chats);
+    return res.json({
+      debug_count: chats.length,
+      data: chats || [],
+    });
   } catch (e) {
-    console.error("Error fetching driver chats:", e);
-    res
-      .status(500)
-      .json({ message: "Ошибка загрузки списка чатов водителя ", e });
+    console.error("CRITICAL ERROR in getDriverChats:", e);
+    res.status(500).json({
+      message: "Ошибка загрузки списка чатов водителя",
+      error: e.message,
+    });
   }
 };
