@@ -253,6 +253,8 @@ export const getDriverChats = async (req, res) => {
     return res.json(chats);
   } catch (e) {
     console.error("Error fetching driver chats:", e);
-    res.status(500).json({ message: "Ошибка загрузки списка чатов водителя" });
+    res
+      .status(500)
+      .json({ message: "Ошибка загрузки списка чатов водителя ", e });
   }
 };
