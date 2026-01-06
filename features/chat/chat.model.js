@@ -38,7 +38,9 @@ const Chat = sequelize.define(
       allowNull: false,
       defaultValue: "order",
       validate: {
-        isIn: [["order", "support", "broadcast", "system"]],
+        isIn: [
+          ["order", "support_client", "support_driver", "broadcast", "system"],
+        ],
       },
     },
     status: {

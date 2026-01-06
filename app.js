@@ -25,10 +25,18 @@ import selfieControlRoutes from "./features/selfieControl/selfieControl.routes.j
 const app = express();
 const httpServer = createServer(app);
 
+/**
+ * [SENIOR DEBUG HUB]: Инициализация Socket.io
+ * Мы используем httpServer, чтобы сокеты и API работали на одном порту Railway.
+ */
 const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
+/**
+ * ПЕРЕХВАТЧИК КОНСОЛИ БЭКЕНДА
+ * Все console.log сервера дублируются в Dashboard.
+ */
 const originalConsole = {
   log: console.log,
   warn: console.warn,
@@ -37,16 +45,22 @@ const originalConsole = {
 
 ["log", "warn", "error"].forEach((method) => {
   console[method] = (...args) => {
+    // Печать в стандартный лог Railway
     originalConsole[method].apply(console, args);
+
     try {
-      const content = args.length > 1 ? args : args[0];
-      io.emit("backend_log", {
-        level: method,
-        message: typeof content === "string" ? content : "Object Log",
-        context: content,
-        time: new Date().toLocaleTimeString(),
-      });
-    } catch (e) {}
+      if (io) {
+        const content = args.length > 1 ? args : args[0];
+        io.emit("backend_log", {
+          level: method,
+          message: typeof content === "string" ? content : "Object Log",
+          context: content,
+          time: new Date().toLocaleTimeString(),
+        });
+      }
+    } catch (e) {
+      // Игнорируем ошибки сериализации, чтобы не ронять сервер
+    }
   };
 });
 
@@ -89,6 +103,7 @@ app.get("/api/debug/table/:name", async (req, res) => {
   }
 });
 
+// Регистрация API маршрутов
 app.use("/api/users", userRoutes);
 app.use("/api", carBrandsRoutes);
 app.use("/api", dropTableByName);
@@ -104,26 +119,50 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/photo-control", photoControlRoutes);
 app.use("/api/selfie-control", selfieControlRoutes);
 
+/**
+ * [RELAY LOGIC]: Трансляция событий от мобильного приложения в браузер.
+ * Мы используем io.emit вместо socket.broadcast, чтобы избежать проблем с потерей пакетов.
+ */
 io.on("connection", (socket) => {
-  socket.on("app_log", (data) => socket.broadcast.emit("log_to_browser", data));
-  socket.on("app_network", (data) =>
-    socket.broadcast.emit("network_to_browser", data)
-  );
+  originalConsole.log("🔌 Новое подключение к Debug Hub (App/Browser)");
+
+  // Логи консоли от приложения
+  socket.on("app_log", (data) => {
+    io.emit("log_to_browser", data);
+  });
+
+  // Сетевые запросы от приложения
+  socket.on("app_network", (data) => {
+    io.emit("network_to_browser", data);
+  });
 });
 
 const PORT = process.env.PORT || 8787;
 
 async function start() {
   try {
+    // 1. Проверяем соединение с БД
     await sequelize.authenticate();
+    console.log("✅ DB connection OK");
+
+    /**
+     * 2. СИНХРОНИЗАЦИЯ МОДЕЛЕЙ
+     * alter: true позволяет добавлять новые поля в таблицы без удаления данных.
+     */
+    // console.log("⏳ Syncing models (alter: true)...");
+    // await sequelize.sync({ alter: true });
+    // console.log("✅ Database synced successfully");
+
+    // 3. Запуск сервера на всех интерфейсах (0.0.0.0) для доступности извне
     httpServer.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Hub & API running on port ${PORT}`);
+      console.log(`🚀 Shumkar Debug Hub & API running on port ${PORT}`);
     });
   } catch (err) {
-    console.error("❌ Init error:", err);
+    console.error("❌ DB init error:", err);
     process.exit(1);
   }
 }
 
 start();
+
 export default app;

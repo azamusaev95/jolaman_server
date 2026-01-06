@@ -223,16 +223,21 @@ export const getDriverChats = async (req, res) => {
 
     const { status } = req.query;
 
+    /**
+     * ЛОГИКА:
+     * 1. Берем чаты, где driverId совпадает (order, support, system)
+     * 2. ИЛИ берем чаты типа 'broadcast' (они для всех)
+     * 3. Обязательно фильтруем по статусу (по умолчанию active)
+     */
     const where = {
-      driverId,
-      type: "order",
+      status: status || "active",
+      [Op.or]: [{ driverId: driverId }, { type: "broadcast" }],
     };
 
-    if (status) {
-      where.status = status;
-    }
-
-    console.log("DEBUG: Searching chats with where clause:", where);
+    console.log(
+      "DEBUG: Searching chats with where clause:",
+      JSON.stringify(where)
+    );
 
     const chats = await Chat.findAll({
       where,
@@ -264,9 +269,8 @@ export const getDriverChats = async (req, res) => {
 
     console.log(`DEBUG: Found ${chats.length} chats`);
 
-    // Временно возвращаем объект, чтобы точно увидеть структуру в Reactotron
-    // Если всё ок, можешь вернуть обратно return res.json(chats);
-    return res.json([]);
+    // Возвращаем найденные чаты вместо пустого массива
+    return res.json(chats);
   } catch (e) {
     console.error("CRITICAL ERROR in getDriverChats:", e);
     res.status(500).json({
