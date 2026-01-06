@@ -132,7 +132,6 @@ export const sendMessage = async (req, res) => {
   }
 };
 
-// @map: getChatMessages (История Сообщений) -> id [Auth]
 export const getChatMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -142,41 +141,72 @@ export const getChatMessages = async (req, res) => {
       return res.status(400).json({ message: "Не передан chatId" });
     }
 
+    // 1. Получаем чат со всеми метаданными
     const chat = await Chat.findByPk(chatId);
     if (!chat) {
       return res.status(404).json({ message: "Чат не найден" });
     }
 
-    // Мягкая синхронизация статуса по TTL (историю смотреть можно всегда)
+    // 2. Мягкая синхронизация статуса по TTL
     const expired = isChatExpired(chat.updatedAt || chat.createdAt);
-    if (expired && chat.status !== "closed") {
+    let currentStatus = chat.status;
+
+    if (expired && chat.status === "active") {
       await Chat.update({ status: "closed" }, { where: { id: chatId } });
+      currentStatus = "closed";
     }
 
+    // 3. Пагинация
     const numericLimit = Number(limit) || 50;
     const numericPage = Number(page) || 1;
     const offset = (numericPage - 1) * numericLimit;
 
+    // 4. Получаем сообщения
     const messages = await ChatMessage.findAndCountAll({
       where: { chatId },
-      order: [["createdAt", "ASC"]],
+      order: [["createdAt", "ASC"]], // Для чата обычно ASC (от старых к новым)
       limit: numericLimit,
       offset,
     });
 
+    /**
+     * ЛОГИКА ОТВЕТА:
+     * Возвращаем объект чата (meta), чтобы фронтенд знал тип (broadcast, support и т.д.)
+     */
     return res.json({
+      // Данные чата для UI (заголовок, тип, возможность отвечать)
+      chat: {
+        id: chat.id,
+        type: chat.type, // 'order', 'support_driver', 'broadcast', 'system'
+        status: currentStatus,
+        title: chat.title,
+        orderId: chat.orderId,
+        clientId: chat.clientId,
+        driverId: chat.driverId,
+        adminId: chat.adminId,
+        // Полезный флаг для фронтенда:
+        canReply:
+          currentStatus === "active" &&
+          !["broadcast", "system"].includes(chat.type),
+      },
+      // Сами сообщения
       items: messages.rows,
-      total: messages.count,
-      page: numericPage,
-      limit: numericLimit,
-      chatStatus: expired ? "closed" : chat.status,
+      // Мета-данные пагинации
+      pagination: {
+        total: messages.count,
+        page: numericPage,
+        limit: numericLimit,
+        totalPages: Math.ceil(messages.count / numericLimit),
+      },
     });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ message: "Ошибка загрузки сообщений" });
+    console.error("ERROR in getChatMessages:", e);
+    res.status(500).json({
+      message: "Ошибка загрузки сообщений",
+      error: e.message,
+    });
   }
 };
-
 // @map: getAllChats (Все Чаты) -> orderId, clientId, driverId, status [Admin/Dispatcher]
 export const getAllChats = async (req, res) => {
   try {
