@@ -3,6 +3,7 @@ import ChatMessage from "../chatMessage/chatMessage.model.js";
 import Order from "../order/order.model.js";
 import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
+import { Op } from "sequelize";
 
 // === Константы TTL для авто-закрытия чатов ===
 const CHAT_TTL_HOURS = 4;
