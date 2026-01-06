@@ -5,18 +5,7 @@ import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
 import { Op } from "sequelize";
 
-// === Константы TTL для авто-закрытия чатов ===
-const CHAT_TTL_HOURS = 4;
-const CHAT_TTL_MS = CHAT_TTL_HOURS * 60 * 60 * 1000;
-
-const isChatExpired = (lastActivity) => {
-  if (!lastActivity) return false;
-  const ts = new Date(lastActivity).getTime();
-  if (Number.isNaN(ts)) return false;
-  return Date.now() - ts > CHAT_TTL_MS;
-};
-
-// @map: getOrCreateOrderChat (Создать/Найти Чат) -> orderId, clientId, driverId, type, status [Public/Auth]
+// @map: getOrCreateOrderChat (Создать/Найти Чат) -> orderId, clientId, driverId
 export const getOrCreateOrderChat = async (req, res) => {
   try {
     const { orderId, clientId, driverId } = req.body;
@@ -72,7 +61,7 @@ export const getOrCreateOrderChat = async (req, res) => {
   }
 };
 
-// @map: sendMessage (Отправить Сообщение) -> id [Auth/Driver/Client]
+// @map: sendMessage (Отправить Сообщение)
 export const sendMessage = async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -93,24 +82,14 @@ export const sendMessage = async (req, res) => {
       return res.status(404).json({ message: "Чат не найден" });
     }
 
-    // Проверяем TTL (по updatedAt чата или последнему сообщению)
-    // Можно использовать только chat.updatedAt, так как мы его обновляем на каждый send
-    const lastActivity = chat.updatedAt || chat.createdAt;
-    const expired = isChatExpired(lastActivity);
-
-    if (expired || chat.status === "closed") {
-      // Если чат ещё не помечен как closed — пометим
-      if (chat.status !== "closed") {
-        await Chat.update({ status: "closed" }, { where: { id: chatId } });
-      }
-
+    // Проверяем только статус (TTL удален)
+    if (chat.status === "closed") {
       return res.status(403).json({
-        message:
-          "Чат закрыт: прошло более 4 часов без активности. Новые сообщения отправить нельзя.",
+        message: "Чат закрыт. Новые сообщения отправить нельзя.",
       });
     }
 
-    // Чат ещё активен — создаём сообщение
+    // Создаём сообщение
     const message = await ChatMessage.create({
       chatId,
       senderId,
@@ -119,11 +98,8 @@ export const sendMessage = async (req, res) => {
       contentType,
     });
 
-    // Обновляем updatedAt и убеждаемся, что статус активный
-    await Chat.update(
-      { updatedAt: new Date(), status: "active" },
-      { where: { id: chatId } }
-    );
+    // Обновляем время последней активности в чате
+    await Chat.update({ updatedAt: new Date() }, { where: { id: chatId } });
 
     return res.json(message);
   } catch (e) {
@@ -132,66 +108,65 @@ export const sendMessage = async (req, res) => {
   }
 };
 
+// @map: getChatMessages (Получить сообщения с метаданными чата)
 export const getChatMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
     const { page = 1, limit = 50 } = req.query;
+    const userId = req.user?.id;
 
     if (!chatId) {
       return res.status(400).json({ message: "Не передан chatId" });
     }
 
-    // 1. Получаем чат со всеми метаданными
+    // 1. Получаем чат (авто-закрытие по TTL удалено)
     const chat = await Chat.findByPk(chatId);
     if (!chat) {
       return res.status(404).json({ message: "Чат не найден" });
     }
 
-    // 2. Мягкая синхронизация статуса по TTL
-    const expired = isChatExpired(chat.updatedAt || chat.createdAt);
-    let currentStatus = chat.status;
-
-    if (expired && chat.status === "active") {
-      await Chat.update({ status: "closed" }, { where: { id: chatId } });
-      currentStatus = "closed";
-    }
-
-    // 3. Пагинация
+    // 2. Пагинация
     const numericLimit = Number(limit) || 50;
     const numericPage = Number(page) || 1;
     const offset = (numericPage - 1) * numericLimit;
 
-    // 4. Получаем сообщения
+    // 3. Получаем сообщения
     const messages = await ChatMessage.findAndCountAll({
       where: { chatId },
-      order: [["createdAt", "ASC"]], // Для чата обычно ASC (от старых к новым)
+      order: [["createdAt", "ASC"]],
       limit: numericLimit,
       offset,
     });
 
-    /**
-     * ЛОГИКА ОТВЕТА:
-     * Возвращаем объект чата (meta), чтобы фронтенд знал тип (broadcast, support и т.д.)
-     */
+    // 4. Помечаем как прочитанные
+    if (userId) {
+      await ChatMessage.update(
+        { isRead: true },
+        {
+          where: {
+            chatId,
+            isRead: false,
+            senderId: { [Op.ne]: userId },
+          },
+        }
+      );
+    }
+
     return res.json({
-      // Данные чата для UI (заголовок, тип, возможность отвечать)
       chat: {
         id: chat.id,
-        type: chat.type, // 'order', 'support_driver', 'broadcast', 'system'
-        status: currentStatus,
+        type: chat.type,
+        status: chat.status,
         title: chat.title,
         orderId: chat.orderId,
         clientId: chat.clientId,
         driverId: chat.driverId,
         adminId: chat.adminId,
-        // Полезный флаг для фронтенда:
         canReply:
-          currentStatus === "active" &&
+          chat.status === "active" &&
           !["broadcast", "system"].includes(chat.type),
       },
-      // Сами сообщения
       items: messages.rows,
-      // Мета-данные пагинации
       pagination: {
         total: messages.count,
         page: numericPage,
@@ -207,13 +182,14 @@ export const getChatMessages = async (req, res) => {
     });
   }
 };
-// @map: getAllChats (Все Чаты) -> orderId, clientId, driverId, status [Admin/Dispatcher]
+
+// @map: getAllChats (Все Чаты для админ-панели)
 export const getAllChats = async (req, res) => {
   try {
     const { orderId, status } = req.query;
     const where = {};
     if (orderId) where.orderId = orderId;
-    if (status) where.status = status; // active | closed | ...
+    if (status) where.status = status;
 
     const chats = await Chat.findAll({
       where,
@@ -242,13 +218,12 @@ export const getAllChats = async (req, res) => {
   }
 };
 
-// @map: getDriverChats (Чаты конкретного водителя) -> driverId [Driver]
+// @map: getDriverChats (Чаты конкретного водителя)
 export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
 
     if (!driverId) {
-      console.log("DEBUG: Driver ID not found in req.user");
       return res.status(401).json({ message: "Не авторизован" });
     }
 
@@ -256,19 +231,18 @@ export const getDriverChats = async (req, res) => {
 
     /**
      * ЛОГИКА:
-     * 1. Берем чаты, где driverId совпадает (order, support, system)
-     * 2. ИЛИ берем чаты типа 'broadcast' (они для всех)
-     * 3. Обязательно фильтруем по статусу (по умолчанию active)
+     * 1. Берем чаты водителя или общие рассылки.
+     * 2. Если статус не указан, показываем всё кроме архива (active + closed).
      */
     const where = {
-      status: status || "active",
       [Op.or]: [{ driverId: driverId }, { type: "broadcast" }],
     };
 
-    console.log(
-      "DEBUG: Searching chats with where clause:",
-      JSON.stringify(where)
-    );
+    if (status) {
+      where.status = status;
+    } else {
+      where.status = { [Op.ne]: "archived" };
+    }
 
     const chats = await Chat.findAll({
       where,
@@ -298,9 +272,6 @@ export const getDriverChats = async (req, res) => {
       order: [["updatedAt", "DESC"]],
     });
 
-    console.log(`DEBUG: Found ${chats.length} chats`);
-
-    // Возвращаем найденные чаты вместо пустого массива
     return res.json(chats);
   } catch (e) {
     console.error("CRITICAL ERROR in getDriverChats:", e);
