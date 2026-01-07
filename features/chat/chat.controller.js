@@ -288,32 +288,42 @@ export const getDriverChats = async (req, res) => {
  */
 export const createSupportChatWithDriver = async (req, res) => {
   try {
+    // Извлекаем данные. adminId теперь может быть null
     const { driverId, adminId, content, senderRole, senderId } = req.body;
 
-    if (!driverId || !adminId || !content || !senderRole || !senderId) {
+    // ИСПРАВЛЕНО: Убрана обязательная проверка adminId
+    if (!driverId || !content || !senderRole || !senderId) {
       return res.status(400).json({
-        message: "Необходимы driverId, adminId, content, senderRole и senderId",
+        message: "Необходимы driverId, content, senderRole и senderId",
       });
     }
 
-    // 1. Ищем существующий активный чат техподдержки для этого водителя
+    /**
+     * 1. Ищем существующий активный чат техподдержки для этого водителя.
+     * Мы ищем чат, где:
+     * - Тип support_driver
+     * - driverId совпадает
+     * - Статус active
+     * - adminId совпадает ИЛИ он еще не назначен (null), если мы создаем новое обращение
+     */
     let chat = await Chat.findOne({
       where: {
         type: "support_driver",
         driverId,
-        adminId,
         status: "active",
+        // Если пришел adminId, ищем с ним, если нет — ищем чат без админа
+        adminId: adminId || null,
       },
     });
 
-    // 2. Если чата нет, создаем новый
+    // 2. Если активного чата нет, создаем новый
     if (!chat) {
       chat = await Chat.create({
         type: "support_driver",
         driverId,
-        adminId,
+        adminId: adminId || null, // Сохраняем null, если админ не передан
         status: "active",
-        title: `Поддержка: Водитель ID ${driverId}`,
+        title: `Поддержка: Водитель ID ${driverId.slice(0, 8)}`,
       });
     }
 
@@ -326,7 +336,7 @@ export const createSupportChatWithDriver = async (req, res) => {
       contentType: "text",
     });
 
-    // 4. Обновляем updatedAt чата для сортировки
+    // 4. Обновляем updatedAt чата, чтобы он поднялся в списке у админа и водителя
     await chat.update({ updatedAt: new Date() });
 
     return res.status(201).json({
@@ -335,6 +345,9 @@ export const createSupportChatWithDriver = async (req, res) => {
     });
   } catch (e) {
     console.error("Error in createSupportChatWithDriver:", e);
-    res.status(500).json({ message: "Ошибка при создании чата с поддержкой" });
+    res.status(500).json({
+      message: "Ошибка при создании чата с поддержкой",
+      error: e.message,
+    });
   }
 };
