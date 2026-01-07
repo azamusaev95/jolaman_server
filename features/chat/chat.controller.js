@@ -281,3 +281,60 @@ export const getDriverChats = async (req, res) => {
     });
   }
 };
+
+/**
+ * @map: createSupportChatWithDriver (Чат Водитель <-> Админ + Первое сообщение)
+ * Создает чат типа support_driver и сразу добавляет сообщение.
+ */
+export const createSupportChatWithDriver = async (req, res) => {
+  try {
+    const { driverId, adminId, content, senderRole, senderId } = req.body;
+
+    if (!driverId || !adminId || !content || !senderRole || !senderId) {
+      return res.status(400).json({
+        message: "Необходимы driverId, adminId, content, senderRole и senderId",
+      });
+    }
+
+    // 1. Ищем существующий активный чат техподдержки для этого водителя
+    let chat = await Chat.findOne({
+      where: {
+        type: "support_driver",
+        driverId,
+        adminId,
+        status: "active",
+      },
+    });
+
+    // 2. Если чата нет, создаем новый
+    if (!chat) {
+      chat = await Chat.create({
+        type: "support_driver",
+        driverId,
+        adminId,
+        status: "active",
+        title: `Поддержка: Водитель ID ${driverId}`,
+      });
+    }
+
+    // 3. Создаем сообщение в этом чате
+    const message = await ChatMessage.create({
+      chatId: chat.id,
+      senderId,
+      senderRole,
+      content,
+      contentType: "text",
+    });
+
+    // 4. Обновляем updatedAt чата для сортировки
+    await chat.update({ updatedAt: new Date() });
+
+    return res.status(201).json({
+      chat,
+      message,
+    });
+  } catch (e) {
+    console.error("Error in createSupportChatWithDriver:", e);
+    res.status(500).json({ message: "Ошибка при создании чата с поддержкой" });
+  }
+};

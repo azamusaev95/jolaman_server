@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getOrCreateOrderChat,
+  createSupportChatWithDriver,
   sendMessage,
   getChatMessages,
   getAllChats,
@@ -16,7 +17,7 @@ const router = Router();
 
 /*
  * =============================
- *   ЧАТЫ ДЛЯ ЗАКАЗА (DRIVER/CLIENT)
+ * ЧАТЫ ДЛЯ ЗАКАЗА (DRIVER/CLIENT)
  * =============================
  */
 
@@ -26,7 +27,17 @@ router.post("/order", getOrCreateOrderChat);
 
 /*
  * =============================
- *   ЧАТЫ ВОДИТЕЛЯ (СПИСОК ДЛЯ МОБИЛКИ)
+ * ЧАТЫ ПОДДЕРЖКИ (DRIVER <-> ADMIN)
+ * =============================
+ */
+
+// Создать прямой чат с поддержкой и отправить первое сообщение
+// POST /api/chats/support/driver
+router.post("/support/driver", createSupportChatWithDriver);
+
+/*
+ * =============================
+ * ЧАТЫ ВОДИТЕЛЯ (СПИСОК ДЛЯ МОБИЛКИ)
  * =============================
  */
 
@@ -36,7 +47,7 @@ router.get("/driver", authDriver, getDriverChats);
 
 /*
  * =============================
- *   СООБЩЕНИЯ В ЧАТЕ
+ * СООБЩЕНИЯ В ЧАТЕ
  * =============================
  */
 
@@ -50,7 +61,7 @@ router.post("/:chatId/messages", sendMessage);
 
 /*
  * =============================
- *   СПИСОК ВСЕХ ЧАТОВ (АДМИН / ДИСПЕТЧЕР)
+ * СПИСОК ВСЕХ ЧАТОВ (АДМИН / ДИСПЕТЧЕР)
  * =============================
  */
 
