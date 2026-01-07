@@ -5,6 +5,17 @@ import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
 import { Op } from "sequelize";
 
+/**
+ * Вспомогательная функция для рассылки через сокеты.
+ * Мы получаем экземпляр io из объекта req.app (удобно для Railway).
+ */
+const emitSocketMessage = (req, chatId, message) => {
+  const io = req.app.get("io");
+  if (io) {
+    io.to(chatId).emit("new_message", message);
+  }
+};
+
 // @map: getOrCreateOrderChat (Создать/Найти Чат) -> orderId, clientId, driverId
 export const getOrCreateOrderChat = async (req, res) => {
   try {
@@ -82,7 +93,7 @@ export const sendMessage = async (req, res) => {
       return res.status(404).json({ message: "Чат не найден" });
     }
 
-    // Проверяем только статус (TTL удален)
+    // Проверяем только статус
     if (chat.status === "closed") {
       return res.status(403).json({
         message: "Чат закрыт. Новые сообщения отправить нельзя.",
@@ -100,6 +111,9 @@ export const sendMessage = async (req, res) => {
 
     // Обновляем время последней активности в чате
     await Chat.update({ updatedAt: new Date() }, { where: { id: chatId } });
+
+    // 🔥 REAL-TIME: Отправляем через сокеты
+    emitSocketMessage(req, chatId, message);
 
     return res.json(message);
   } catch (e) {
@@ -119,18 +133,15 @@ export const getChatMessages = async (req, res) => {
       return res.status(400).json({ message: "Не передан chatId" });
     }
 
-    // 1. Получаем чат (авто-закрытие по TTL удалено)
     const chat = await Chat.findByPk(chatId);
     if (!chat) {
       return res.status(404).json({ message: "Чат не найден" });
     }
 
-    // 2. Пагинация
     const numericLimit = Number(limit) || 50;
     const numericPage = Number(page) || 1;
     const offset = (numericPage - 1) * numericLimit;
 
-    // 3. Получаем сообщения
     const messages = await ChatMessage.findAndCountAll({
       where: { chatId },
       order: [["createdAt", "ASC"]],
@@ -138,7 +149,6 @@ export const getChatMessages = async (req, res) => {
       offset,
     });
 
-    // 4. Помечаем как прочитанные
     if (userId) {
       await ChatMessage.update(
         { isRead: true },
@@ -229,11 +239,6 @@ export const getDriverChats = async (req, res) => {
 
     const { status } = req.query;
 
-    /**
-     * ЛОГИКА:
-     * 1. Берем чаты водителя или общие рассылки.
-     * 2. Если статус не указан, показываем всё кроме архива (active + closed).
-     */
     const where = {
       [Op.or]: [{ driverId: driverId }, { type: "broadcast" }],
     };
@@ -284,50 +289,36 @@ export const getDriverChats = async (req, res) => {
 
 /**
  * @map: createSupportChatWithDriver (Чат Водитель <-> Админ + Первое сообщение)
- * Создает чат типа support_driver и сразу добавляет сообщение.
  */
 export const createSupportChatWithDriver = async (req, res) => {
   try {
-    // Извлекаем данные. adminId теперь может быть null
     const { driverId, adminId, content, senderRole, senderId } = req.body;
 
-    // ИСПРАВЛЕНО: Убрана обязательная проверка adminId
     if (!driverId || !content || !senderRole || !senderId) {
       return res.status(400).json({
         message: "Необходимы driverId, content, senderRole и senderId",
       });
     }
 
-    /**
-     * 1. Ищем существующий активный чат техподдержки для этого водителя.
-     * Мы ищем чат, где:
-     * - Тип support_driver
-     * - driverId совпадает
-     * - Статус active
-     * - adminId совпадает ИЛИ он еще не назначен (null), если мы создаем новое обращение
-     */
     let chat = await Chat.findOne({
       where: {
         type: "support_driver",
         driverId,
         status: "active",
-        // Если пришел adminId, ищем с ним, если нет — ищем чат без админа
         adminId: adminId || null,
       },
     });
 
-    // 2. Если активного чата нет, создаем новый
     if (!chat) {
       chat = await Chat.create({
         type: "support_driver",
         driverId,
-        adminId: adminId || null, // Сохраняем null, если админ не передан
+        adminId: adminId || null,
         status: "active",
         title: `Поддержка: Водитель ID ${driverId.slice(0, 8)}`,
       });
     }
 
-    // 3. Создаем сообщение в этом чате
     const message = await ChatMessage.create({
       chatId: chat.id,
       senderId,
@@ -336,8 +327,10 @@ export const createSupportChatWithDriver = async (req, res) => {
       contentType: "text",
     });
 
-    // 4. Обновляем updatedAt чата, чтобы он поднялся в списке у админа и водителя
     await chat.update({ updatedAt: new Date() });
+
+    // 🔥 REAL-TIME: Отправляем через сокеты
+    emitSocketMessage(req, chat.id, message);
 
     return res.status(201).json({
       chat,

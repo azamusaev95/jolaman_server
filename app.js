@@ -26,12 +26,21 @@ const app = express();
 const httpServer = createServer(app);
 
 /**
- * [SENIOR DEBUG HUB]: Инициализация Socket.io
- * Мы используем httpServer, чтобы сокеты и API работали на одном порту Railway.
+ * [SENIOR CONFIG]: Инициализация Socket.io
+ * Настройки оптимизированы для Railway (увеличены таймауты для стабильности прокси).
  */
 const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
+
+/**
+ * 🔥 ВАЖНО ДЛЯ КОНТРОЛЛЕРОВ:
+ * Сохраняем экземпляр io в настройках app.
+ * Это позволяет в любом контроллере вызвать: req.app.get("io")
+ */
+app.set("io", io);
 
 /**
  * ПЕРЕХВАТЧИК КОНСОЛИ БЭКЕНДА
@@ -59,7 +68,7 @@ const originalConsole = {
         });
       }
     } catch (e) {
-      // Игнорируем ошибки сериализации, чтобы не ронять сервер
+      // Игнорируем ошибки сериализации
     }
   };
 });
@@ -120,20 +129,35 @@ app.use("/api/photo-control", photoControlRoutes);
 app.use("/api/selfie-control", selfieControlRoutes);
 
 /**
- * [RELAY LOGIC]: Трансляция событий от мобильного приложения в браузер.
- * Мы используем io.emit вместо socket.broadcast, чтобы избежать проблем с потерей пакетов.
+ * [REAL-TIME LOGIC]: Обработка соединений
  */
 io.on("connection", (socket) => {
-  originalConsole.log("🔌 Новое подключение к Debug Hub (App/Browser)");
+  originalConsole.log(`🔌 New connection: ${socket.id}`);
 
-  // Логи консоли от приложения
+  /**
+   * 🏠 ROOMS LOGIC:
+   * Когда мобильное приложение или админ-панель открывают конкретный чат,
+   * они должны вызвать socket.emit("join_chat", chatId);
+   */
+  socket.on("join_chat", (chatId) => {
+    if (chatId) {
+      socket.join(chatId);
+      originalConsole.log(`📂 Socket ${socket.id} joined room: ${chatId}`);
+    }
+  });
+
+  // Логи консоли от приложения (для отладки)
   socket.on("app_log", (data) => {
     io.emit("log_to_browser", data);
   });
 
-  // Сетевые запросы от приложения
+  // Сетевые запросы от приложения (для отладки)
   socket.on("app_network", (data) => {
     io.emit("network_to_browser", data);
+  });
+
+  socket.on("disconnect", () => {
+    originalConsole.log(`❌ Disconnected: ${socket.id}`);
   });
 });
 
@@ -145,17 +169,9 @@ async function start() {
     await sequelize.authenticate();
     console.log("✅ DB connection OK");
 
-    /**
-     * 2. СИНХРОНИЗАЦИЯ МОДЕЛЕЙ
-     * alter: true позволяет добавлять новые поля в таблицы без удаления данных.
-     */
-    // console.log("⏳ Syncing models (alter: true)...");
-    // await sequelize.sync({ alter: true });
-    // console.log("✅ Database synced successfully");
-
-    // 3. Запуск сервера на всех интерфейсах (0.0.0.0) для доступности извне
+    // 2. Запуск сервера
     httpServer.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Shumkar Debug Hub & API running on port ${PORT}`);
+      console.log(`🚀 Shumkar Server running on port ${PORT}`);
     });
   } catch (err) {
     console.error("❌ DB init error:", err);
