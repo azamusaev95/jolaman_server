@@ -25,29 +25,19 @@ import selfieControlRoutes from "./features/selfieControl/selfieControl.routes.j
 const app = express();
 const httpServer = createServer(app);
 
-// ======================================================
-// SOCKET.IO — ЧИСТЫЙ WEBSOCKET (без polling)
-// ======================================================
+// SOCKET.IO
 const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
-
-  // Важно: только websocket
   transports: ["websocket", "polling"],
 
-  // Запрещаем апгрейды (т.к. polling выключен — upgrade нам не нужен)
-  // allowUpgrades: false,
-
-  // Тайминги
+  // ⚠️ НЕ СТАВЬ allowUpgrades:false (на Railway часто даёт “тишину”)
   pingTimeout: 60000,
   pingInterval: 25000,
 });
 
-// Сохраняем io в app
 app.set("io", io);
 
-// ======================================================
 // ПЕРЕХВАТЧИК ЛОГОВ
-// ======================================================
 const originalConsole = {
   log: console.log,
   warn: console.warn,
@@ -74,9 +64,7 @@ const originalConsole = {
 app.use(cors());
 app.use(express.json({ limit: "256kb" }));
 
-// ======================================================
 // API ROUTES
-// ======================================================
 app.get("/api/debug/tables", async (req, res) => {
   try {
     const [results] = await sequelize.query(`
@@ -104,16 +92,56 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/photo-control", photoControlRoutes);
 app.use("/api/selfie-control", selfieControlRoutes);
 
-// ======================================================
 // SOCKET LOGIC
-// ======================================================
 io.on("connection", (socket) => {
   originalConsole.log(`🔌 [SOCKET] New connection: ${socket.id}`);
 
-  // Админы входят сюда
+  // ✅ Авто-джоин по query (у тебя RN уже передает driverId)
+  const q = socket.handshake?.query || {};
+  const driverId = q.driverId ? String(q.driverId) : null;
+  const clientId = q.clientId ? String(q.clientId) : null;
+
+  if (driverId) {
+    socket.join("drivers");
+    socket.join(`driver:${driverId}`);
+    originalConsole.log(
+      `🚕 [SOCKET] ${socket.id} auto-joined rooms: drivers, driver:${driverId}`
+    );
+  }
+
+  if (clientId) {
+    socket.join("clients");
+    socket.join(`client:${clientId}`);
+    originalConsole.log(
+      `👤 [SOCKET] ${socket.id} auto-joined rooms: clients, client:${clientId}`
+    );
+  }
+
+  // Админский канал (как было)
   socket.on("join_admin", () => {
     socket.join("admins");
     originalConsole.log(`🛡️ [SOCKET] ${socket.id} joined ADMIN channel`);
+  });
+
+  // (Опционально) Явное подключение к ролям, если захочешь дергать с фронта
+  socket.on("join_driver", (id) => {
+    if (!id) return;
+    const did = String(id);
+    socket.join("drivers");
+    socket.join(`driver:${did}`);
+    originalConsole.log(
+      `🚕 [SOCKET] ${socket.id} joined driver rooms: drivers, driver:${did}`
+    );
+  });
+
+  socket.on("join_client", (id) => {
+    if (!id) return;
+    const cid = String(id);
+    socket.join("clients");
+    socket.join(`client:${cid}`);
+    originalConsole.log(
+      `👤 [SOCKET] ${socket.id} joined client rooms: clients, client:${cid}`
+    );
   });
 
   // Вход в конкретный чат

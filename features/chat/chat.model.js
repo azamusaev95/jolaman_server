@@ -1,12 +1,12 @@
 /**
  * @map_model Chat
  * @field id {UUID} - Уникальный ID чата
- * @field type {String} - order | support | broadcast | system
+ * @field type {String} - order | support_client | support_driver | broadcast_driver | broadcast_client | system_driver | system_client
  * @field status {String} - active | closed | archived
  * @field orderId {UUID} - Ссылка на Заказ (для типа order)
- * @field clientId {UUID} - Ссылка на Клиента
- * @field driverId {UUID} - Ссылка на Водителя
- * @field adminId {UUID} - Ссылка на Админа
+ * @field clientId {UUID} - Ссылка на Клиента (для order/support_client/system_client)
+ * @field driverId {UUID} - Ссылка на Водителя (для order/support_driver/system_driver)
+ * @field adminId {UUID} - Ссылка на Админа (кто создал/ведет поддержку/рассылку)
  * @field title {String} - Заголовок (например, "Акция: Бонус 10%")
  */
 
@@ -27,11 +27,17 @@ const Chat = sequelize.define(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
+
     /**
      * order: Чат по конкретному заказу (Клиент <-> Водитель)
-     * support: Чат с техподдержкой (Водитель/Клиент <-> Админ)
-     * broadcast: Новости, бонусы, акции (Админ -> Всем) - ОТВЕТ ЗАПРЕЩЕН
-     * system: Личные уведомления (Система -> Водителю) - ОТВЕТ ЗАПРЕЩЕН
+     * support_client: Чат поддержки клиента (Клиент <-> Админ)
+     * support_driver: Чат поддержки водителя (Водитель <-> Админ)
+     *
+     * broadcast_driver: Рассылка водителям (Админ -> Всем водителям) - ОТВЕТ ЗАПРЕЩЕН
+     * broadcast_client: Рассылка клиентам (Админ -> Всем клиентам) - ОТВЕТ ЗАПРЕЩЕН
+     *
+     * system_driver: Личное системное уведомление водителю (Система/Админ -> Водителю) - ОТВЕТ ЗАПРЕЩЕН
+     * system_client: Личное системное уведомление клиенту (Система/Админ -> Клиенту) - ОТВЕТ ЗАПРЕЩЕН
      */
     type: {
       type: DataTypes.STRING,
@@ -39,10 +45,19 @@ const Chat = sequelize.define(
       defaultValue: "order",
       validate: {
         isIn: [
-          ["order", "support_client", "support_driver", "broadcast", "system"],
+          [
+            "order",
+            "support_client",
+            "support_driver",
+            "broadcast_driver",
+            "broadcast_client",
+            "system_driver",
+            "system_client",
+          ],
         ],
       },
     },
+
     status: {
       type: DataTypes.STRING,
       defaultValue: "active",
@@ -50,26 +65,31 @@ const Chat = sequelize.define(
         isIn: [["active", "closed", "archived"]],
       },
     },
-    // Заголовок для новостей или акций
+
+    // Заголовок для новостей/акций/системных уведомлений
     title: {
       type: DataTypes.STRING,
       allowNull: true,
     },
+
     orderId: {
       type: DataTypes.UUID,
       field: "order_id",
       allowNull: true,
     },
+
     clientId: {
       type: DataTypes.UUID,
       field: "client_id",
       allowNull: true,
     },
+
     driverId: {
       type: DataTypes.UUID,
       field: "driver_id",
       allowNull: true,
     },
+
     adminId: {
       type: DataTypes.UUID,
       field: "admin_id",
@@ -112,6 +132,8 @@ Chat.belongsTo(Driver, {
   as: "driver",
 });
 
-console.log("🔗 Chat Model: Связи обновлены (broadcast/system типы добавлены)");
+console.log(
+  "🔗 Chat Model: Связи обновлены (broadcast_driver/broadcast_client/system_driver/system_client добавлены)"
+);
 
 export default Chat;

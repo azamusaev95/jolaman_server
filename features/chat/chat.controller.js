@@ -5,8 +5,17 @@ import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
 import { Op } from "sequelize";
 
+const READ_ONLY_TYPES = new Set([
+  "broadcast_driver",
+  "broadcast_client",
+  "system_driver",
+  "system_client",
+]);
+
 /**
- * Отправляет сообщение и участникам чата, и всем админам
+ * Отправляет сообщение:
+ * - в комнату конкретного чата (chatId)
+ * - в глобальный канал админов
  */
 const emitSocketMessage = (req, chatId, message) => {
   try {
@@ -18,10 +27,7 @@ const emitSocketMessage = (req, chatId, message) => {
 
     const roomName = String(chatId);
 
-    // 1) В комнату чата (участникам)
     io.to(roomName).emit("new_message", message);
-
-    // 2) Всем админам (кто реально сделал join_admin)
     io.to("admins").emit("new_message", message);
 
     console.log(`📡 [SOCKET] Broadcasted to room '${roomName}' AND 'admins'`);
@@ -29,6 +35,36 @@ const emitSocketMessage = (req, chatId, message) => {
     console.error("❌ [SOCKET ERROR]", err);
   }
 };
+
+/**
+ * Пуш для рассылок/системных:
+ * - broadcast_driver -> room "drivers"
+ * - broadcast_client -> room "clients"
+ * - system_driver -> room `driver:<id>`
+ * - system_client -> room `client:<id>`
+ */
+const emitAudiencePush = (req, chat, message) => {
+  try {
+    const io = req.app.get("io");
+    if (!io) return;
+
+    if (chat.type === "broadcast_driver") {
+      io.to("drivers").emit("new_message", message);
+    } else if (chat.type === "broadcast_client") {
+      io.to("clients").emit("new_message", message);
+    } else if (chat.type === "system_driver" && chat.driverId) {
+      io.to(`driver:${chat.driverId}`).emit("new_message", message);
+    } else if (chat.type === "system_client" && chat.clientId) {
+      io.to(`client:${chat.clientId}`).emit("new_message", message);
+    }
+  } catch (e) {
+    console.error("❌ [SOCKET AUDIENCE PUSH ERROR]", e);
+  }
+};
+
+// ======================================================
+// ORDER CHAT
+// ======================================================
 
 // @map: getOrCreateOrderChat
 export const getOrCreateOrderChat = async (req, res) => {
@@ -73,6 +109,10 @@ export const getOrCreateOrderChat = async (req, res) => {
   }
 };
 
+// ======================================================
+// SEND MESSAGE (обычные чаты)
+// ======================================================
+
 // @map: sendMessage
 export const sendMessage = async (req, res) => {
   try {
@@ -85,8 +125,8 @@ export const sendMessage = async (req, res) => {
     const chat = await Chat.findByPk(chatId);
     if (!chat) return res.status(404).json({ message: "Chat not found" });
 
-    // ✅ Запрет на ответы в broadcast/system на уровне API
-    if (["broadcast", "system"].includes(chat.type)) {
+    // ✅ Запрет на ответы в broadcast/system_* на уровне API
+    if (READ_ONLY_TYPES.has(chat.type)) {
       return res
         .status(403)
         .json({ message: "Replies are not allowed in this chat" });
@@ -106,7 +146,7 @@ export const sendMessage = async (req, res) => {
 
     await Chat.update({ updatedAt: new Date() }, { where: { id: chatId } });
 
-    // 🔥 ОТПРАВКА СОКЕТА
+    // 🔥 сокеты
     emitSocketMessage(req, chatId, message);
 
     return res.json(message);
@@ -115,6 +155,10 @@ export const sendMessage = async (req, res) => {
     res.status(500).json({ message: "Send error" });
   }
 };
+
+// ======================================================
+// GET MESSAGES
+// ======================================================
 
 // @map: getChatMessages
 export const getChatMessages = async (req, res) => {
@@ -143,9 +187,9 @@ export const getChatMessages = async (req, res) => {
       );
     }
 
-    // ✅ Отдаем canReply, чтобы RN UI работал правильно
+    // ✅ canReply (RN)
     const canReply =
-      chat.status !== "closed" && !["broadcast", "system"].includes(chat.type);
+      chat.status !== "closed" && !READ_ONLY_TYPES.has(chat.type);
 
     return res.json({
       chat: {
@@ -165,13 +209,18 @@ export const getChatMessages = async (req, res) => {
   }
 };
 
+// ======================================================
+// LIST CHATS (admin)
+// ======================================================
+
 // @map: getAllChats
 export const getAllChats = async (req, res) => {
   try {
-    const { orderId, status } = req.query;
+    const { orderId, status, type } = req.query;
     const where = {};
     if (orderId) where.orderId = orderId;
     if (status) where.status = status;
+    if (type) where.type = type;
 
     const chats = await Chat.findAll({
       where,
@@ -199,12 +248,27 @@ export const getAllChats = async (req, res) => {
   }
 };
 
+// ======================================================
+// LIST CHATS (driver app)
+// ======================================================
+
 // @map: getDriverChats
 export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
     const { status } = req.query;
-    const where = { [Op.or]: [{ driverId }, { type: "broadcast" }] };
+
+    // водитель видит:
+    // - свои чаты (driverId)
+    // - рассылку водителям (broadcast_driver)
+    // system_driver будет и так по driverId, но оставим явно тоже
+    const where = {
+      [Op.or]: [
+        { driverId },
+        { type: "broadcast_driver" },
+        { type: "system_driver", driverId },
+      ],
+    };
 
     if (status) where.status = status;
     else where.status = { [Op.ne]: "archived" };
@@ -231,6 +295,10 @@ export const getDriverChats = async (req, res) => {
   }
 };
 
+// ======================================================
+// SUPPORT DRIVER
+// ======================================================
+
 // @map: createSupportChatWithDriver
 export const createSupportChatWithDriver = async (req, res) => {
   try {
@@ -246,7 +314,7 @@ export const createSupportChatWithDriver = async (req, res) => {
         driverId,
         adminId: adminId || null,
         status: "active",
-        title: `Поддержка`,
+        title: "Поддержка",
       });
     }
 
@@ -260,8 +328,127 @@ export const createSupportChatWithDriver = async (req, res) => {
 
     await chat.update({ updatedAt: new Date() });
 
-    // 🔥 ОТПРАВКА СОКЕТА
     emitSocketMessage(req, chat.id, message);
+
+    return res.status(201).json({ chat, message });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: "Error" });
+  }
+};
+
+// ======================================================
+// NEW: BROADCAST (отдельный чат на каждую рассылку)
+// ======================================================
+
+// @map: createBroadcastChat
+export const createBroadcastChat = async (req, res) => {
+  try {
+    const {
+      target, // "driver" | "client"
+      title,
+      content,
+      adminId,
+      senderId,
+      senderRole,
+      contentType = "text",
+    } = req.body;
+
+    if (!target || !["driver", "client"].includes(target)) {
+      return res.status(400).json({ message: "target must be driver|client" });
+    }
+    if (!content) return res.status(400).json({ message: "No content" });
+
+    const type = target === "driver" ? "broadcast_driver" : "broadcast_client";
+
+    const chat = await Chat.create({
+      type,
+      status: "active",
+      title: title || null,
+      adminId: adminId || senderId || null,
+    });
+
+    const message = await ChatMessage.create({
+      chatId: chat.id,
+      senderId: senderId || adminId || null,
+      senderRole: senderRole || "admin",
+      content,
+      contentType,
+    });
+
+    await chat.update({ updatedAt: new Date() });
+
+    // 1) в комнату чата (если кто-то открыл этот чат)
+    emitSocketMessage(req, chat.id, message);
+
+    // 2) всем по аудитории (drivers/clients) + админам
+    emitAudiencePush(req, chat, message);
+    // admins уже получили через emitSocketMessage
+
+    return res.status(201).json({ chat, message });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: "Error" });
+  }
+};
+
+// ======================================================
+// NEW: SYSTEM (отдельный чат на каждого получателя)
+// ======================================================
+
+// @map: createSystemChat
+export const createSystemChat = async (req, res) => {
+  try {
+    const {
+      target, // "driver" | "client"
+      driverId,
+      clientId,
+      title,
+      content,
+      adminId,
+      senderId,
+      senderRole,
+      contentType = "text",
+    } = req.body;
+
+    if (!target || !["driver", "client"].includes(target)) {
+      return res.status(400).json({ message: "target must be driver|client" });
+    }
+    if (!content) return res.status(400).json({ message: "No content" });
+
+    if (target === "driver" && !driverId) {
+      return res.status(400).json({ message: "driverId required" });
+    }
+    if (target === "client" && !clientId) {
+      return res.status(400).json({ message: "clientId required" });
+    }
+
+    const type = target === "driver" ? "system_driver" : "system_client";
+
+    const chat = await Chat.create({
+      type,
+      status: "active",
+      title: title || "Система",
+      driverId: target === "driver" ? driverId : null,
+      clientId: target === "client" ? clientId : null,
+      adminId: adminId || senderId || null,
+    });
+
+    const message = await ChatMessage.create({
+      chatId: chat.id,
+      senderId: senderId || adminId || null,
+      senderRole: senderRole || "system",
+      content,
+      contentType,
+    });
+
+    await chat.update({ updatedAt: new Date() });
+
+    // 1) в комнату чата (если кто-то открыл именно этот system чат)
+    emitSocketMessage(req, chat.id, message);
+
+    // 2) личная доставка (driver:<id> / client:<id>)
+    emitAudiencePush(req, chat, message);
 
     return res.status(201).json({ chat, message });
   } catch (e) {

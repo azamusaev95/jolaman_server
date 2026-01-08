@@ -1,71 +1,34 @@
 import { Router } from "express";
+
 import {
   getOrCreateOrderChat,
-  createSupportChatWithDriver,
   sendMessage,
   getChatMessages,
   getAllChats,
   getDriverChats,
+  createSupportChatWithDriver,
+  createBroadcastChat,
+  createSystemChat,
 } from "./chat.controller.js";
-import { authDriver } from "../middlwares/authDriver.js";
-
-// 🎯 при необходимости подключим разные миддлвары
-// import { authDriver } from "../middlewares/authDriver.js";
-// import { authAdmin } from "../middlewares/authAdmin.js";
 
 const router = Router();
 
-/*
- * =============================
- * ЧАТЫ ДЛЯ ЗАКАЗА (DRIVER/CLIENT)
- * =============================
- */
+// ORDER
+router.post("/order-chat", getOrCreateOrderChat);
 
-// Создать или вернуть существующий чат по заказу
-// POST /api/chats/order
-router.post("/order", getOrCreateOrderChat);
-
-/*
- * =============================
- * ЧАТЫ ПОДДЕРЖКИ (DRIVER <-> ADMIN)
- * =============================
- */
-
-// Создать прямой чат с поддержкой и отправить первое сообщение
-// POST /api/chats/support/driver
-router.post("/support/driver", createSupportChatWithDriver);
-
-/*
- * =============================
- * ЧАТЫ ВОДИТЕЛЯ (СПИСОК ДЛЯ МОБИЛКИ)
- * =============================
- */
-
-// GET /api/chats/driver
-// authDriver — позже подключим
-router.get("/driver", authDriver, getDriverChats);
-
-/*
- * =============================
- * СООБЩЕНИЯ В ЧАТЕ
- * =============================
- */
-
-// Получить историю сообщений
-// GET /api/chats/:chatId/messages
+// MESSAGES
+router.post("/:chatId/messages", sendMessage);
 router.get("/:chatId/messages", getChatMessages);
 
-// Отправить сообщение
-// POST /api/chats/:chatId/messages
-router.post("/:chatId/messages", sendMessage);
+// LISTS
+router.get("/", getAllChats);
+router.get("/driver", getDriverChats);
 
-/*
- * =============================
- * СПИСОК ВСЕХ ЧАТОВ (АДМИН / ДИСПЕТЧЕР)
- * =============================
- */
+// SUPPORT
+router.post("/support/driver", createSupportChatWithDriver);
 
-// GET /api/chats
-router.get("/", /* authAdmin, */ getAllChats);
+// NEW: BROADCAST + SYSTEM
+router.post("/broadcast", createBroadcastChat);
+router.post("/system", createSystemChat);
 
 export default router;
