@@ -25,27 +25,24 @@ import selfieControlRoutes from "./features/selfieControl/selfieControl.routes.j
 const app = express();
 const httpServer = createServer(app);
 
-/**
- * [SENIOR CONFIG]: Инициализация Socket.io
- * Настройки оптимизированы для Railway (увеличены таймауты для стабильности прокси).
- */
+// ==========================================
+// 1. ИНИЦИАЛИЗАЦИЯ SOCKET.IO
+// ==========================================
 const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   pingTimeout: 60000,
   pingInterval: 25000,
 });
 
-/**
- * 🔥 ВАЖНО ДЛЯ КОНТРОЛЛЕРОВ:
- * Сохраняем экземпляр io в настройках app.
- * Это позволяет в любом контроллере вызвать: req.app.get("io")
- */
+// ==========================================
+// 2. СОХРАНЕНИЕ IO В APP
+// Это ключевой момент, чтобы контроллеры видели сокеты
+// ==========================================
 app.set("io", io);
 
-/**
- * ПЕРЕХВАТЧИК КОНСОЛИ БЭКЕНДА
- * Все console.log сервера дублируются в Dashboard.
- */
+// ==========================================
+// 3. ПЕРЕХВАТЧИК ЛОГОВ (Твой код)
+// ==========================================
 const originalConsole = {
   log: console.log,
   warn: console.warn,
@@ -54,9 +51,7 @@ const originalConsole = {
 
 ["log", "warn", "error"].forEach((method) => {
   console[method] = (...args) => {
-    // Печать в стандартный лог Railway
     originalConsole[method].apply(console, args);
-
     try {
       if (io) {
         const content = args.length > 1 ? args : args[0];
@@ -67,18 +62,16 @@ const originalConsole = {
           time: new Date().toLocaleTimeString(),
         });
       }
-    } catch (e) {
-      // Игнорируем ошибки сериализации
-    }
+    } catch (e) {}
   };
 });
 
 app.use(cors());
 app.use(express.json({ limit: "256kb" }));
 
-/**
- * [DEBUG API]: Список всех таблиц БД
- */
+// ==========================================
+// 4. API ROUTES
+// ==========================================
 app.get("/api/debug/tables", async (req, res) => {
   try {
     const [results] = await sequelize.query(`
@@ -93,9 +86,6 @@ app.get("/api/debug/tables", async (req, res) => {
   }
 });
 
-/**
- * [DEBUG API]: Данные конкретной таблицы
- */
 app.get("/api/debug/table/:name", async (req, res) => {
   try {
     const tableName = req.params.name;
@@ -112,7 +102,6 @@ app.get("/api/debug/table/:name", async (req, res) => {
   }
 });
 
-// Регистрация API маршрутов
 app.use("/api/users", userRoutes);
 app.use("/api", carBrandsRoutes);
 app.use("/api", dropTableByName);
@@ -128,36 +117,36 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/photo-control", photoControlRoutes);
 app.use("/api/selfie-control", selfieControlRoutes);
 
-/**
- * [REAL-TIME LOGIC]: Обработка соединений
- */
+// ==========================================
+// 5. ЛОГИКА СОКЕТОВ (REAL-TIME)
+// ==========================================
 io.on("connection", (socket) => {
-  originalConsole.log(`🔌 New connection: ${socket.id}`);
+  originalConsole.log(`🔌 [SOCKET] New connection: ${socket.id}`);
 
-  /**
-   * 🏠 ROOMS LOGIC:
-   * Когда мобильное приложение или админ-панель открывают конкретный чат,
-   * они должны вызвать socket.emit("join_chat", chatId);
-   */
+  // Вход в комнату чата
   socket.on("join_chat", (chatId) => {
     if (chatId) {
-      socket.join(chatId);
-      originalConsole.log(`📂 Socket ${socket.id} joined room: ${chatId}`);
+      // ПРИНУДИТЕЛЬНО приводим к строке, чтобы избежать багов '123' vs 123
+      const roomName = String(chatId);
+      socket.join(roomName);
+      originalConsole.log(`📂 [SOCKET] ${socket.id} joined room: ${roomName}`);
+    } else {
+      originalConsole.warn(
+        `⚠️ [SOCKET] ${socket.id} tried to join empty chatId`
+      );
     }
   });
 
-  // Логи консоли от приложения (для отладки)
   socket.on("app_log", (data) => {
     io.emit("log_to_browser", data);
   });
 
-  // Сетевые запросы от приложения (для отладки)
   socket.on("app_network", (data) => {
     io.emit("network_to_browser", data);
   });
 
   socket.on("disconnect", () => {
-    originalConsole.log(`❌ Disconnected: ${socket.id}`);
+    originalConsole.log(`❌ [SOCKET] Disconnected: ${socket.id}`);
   });
 });
 
@@ -165,11 +154,10 @@ const PORT = process.env.PORT || 8787;
 
 async function start() {
   try {
-    // 1. Проверяем соединение с БД
     await sequelize.authenticate();
     console.log("✅ DB connection OK");
 
-    // 2. Запуск сервера
+    // ВАЖНО: запускаем httpServer, а не app.listen
     httpServer.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Shumkar Server running on port ${PORT}`);
     });

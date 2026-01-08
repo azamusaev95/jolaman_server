@@ -6,17 +6,26 @@ import Driver from "../driver/driver.model.js";
 import { Op } from "sequelize";
 
 /**
- * Вспомогательная функция для рассылки через сокеты.
- * Мы получаем экземпляр io из объекта req.app (удобно для Railway).
+ * Вспомогательная функция отправки сообщения через сокет
  */
 const emitSocketMessage = (req, chatId, message) => {
-  const io = req.app.get("io");
-  if (io) {
-    io.to(chatId).emit("new_message", message);
+  try {
+    const io = req.app.get("io");
+    if (io) {
+      const roomName = String(chatId); // Гарантируем строку
+      console.log(
+        `📡 [SOCKET EMIT] Sending 'new_message' to room: ${roomName}`
+      );
+      io.to(roomName).emit("new_message", message);
+    } else {
+      console.error("❌ [SOCKET ERROR] IO instance not found in req.app");
+    }
+  } catch (err) {
+    console.error("❌ [SOCKET ERROR] Emit failed:", err);
   }
 };
 
-// @map: getOrCreateOrderChat (Создать/Найти Чат) -> orderId, clientId, driverId
+// @map: getOrCreateOrderChat
 export const getOrCreateOrderChat = async (req, res) => {
   try {
     const { orderId, clientId, driverId } = req.body;
@@ -27,7 +36,6 @@ export const getOrCreateOrderChat = async (req, res) => {
       });
     }
 
-    // Ищем существующий чат по заказу
     let chat = await Chat.findOne({
       where: { orderId },
       include: [
@@ -42,7 +50,6 @@ export const getOrCreateOrderChat = async (req, res) => {
     });
 
     if (!chat) {
-      // Создаем новый чат под заказ
       const newChat = await Chat.create({
         type: "order",
         orderId,
@@ -51,7 +58,6 @@ export const getOrCreateOrderChat = async (req, res) => {
         status: "active",
       });
 
-      // Перезагружаем с данными связей
       chat = await Chat.findByPk(newChat.id, {
         include: [
           { model: Client, as: "client", attributes: ["name", "phone"] },
@@ -72,35 +78,25 @@ export const getOrCreateOrderChat = async (req, res) => {
   }
 };
 
-// @map: sendMessage (Отправить Сообщение)
+// @map: sendMessage
 export const sendMessage = async (req, res) => {
   try {
     const { chatId } = req.params;
     const { senderId, senderRole, content, contentType = "text" } = req.body;
 
-    if (!chatId) {
-      return res.status(400).json({ message: "Не передан chatId" });
-    }
+    if (!chatId) return res.status(400).json({ message: "Не передан chatId" });
     if (!senderId || !senderRole || !content) {
-      return res.status(400).json({
-        message: "Нужно передать senderId, senderRole и content",
-      });
+      return res.status(400).json({ message: "Неполные данные" });
     }
 
-    // Находим чат
     const chat = await Chat.findByPk(chatId);
-    if (!chat) {
-      return res.status(404).json({ message: "Чат не найден" });
-    }
+    if (!chat) return res.status(404).json({ message: "Чат не найден" });
 
-    // Проверяем только статус
     if (chat.status === "closed") {
-      return res.status(403).json({
-        message: "Чат закрыт. Новые сообщения отправить нельзя.",
-      });
+      return res.status(403).json({ message: "Чат закрыт" });
     }
 
-    // Создаём сообщение
+    // Создаём сообщение в БД
     const message = await ChatMessage.create({
       chatId,
       senderId,
@@ -109,10 +105,10 @@ export const sendMessage = async (req, res) => {
       contentType,
     });
 
-    // Обновляем время последней активности в чате
+    // Обновляем время чата
     await Chat.update({ updatedAt: new Date() }, { where: { id: chatId } });
 
-    // 🔥 REAL-TIME: Отправляем через сокеты
+    // 🔥 REAL-TIME PUSH
     emitSocketMessage(req, chatId, message);
 
     return res.json(message);
@@ -122,21 +118,17 @@ export const sendMessage = async (req, res) => {
   }
 };
 
-// @map: getChatMessages (Получить сообщения с метаданными чата)
+// @map: getChatMessages
 export const getChatMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
     const { page = 1, limit = 50 } = req.query;
     const userId = req.user?.id;
 
-    if (!chatId) {
-      return res.status(400).json({ message: "Не передан chatId" });
-    }
+    if (!chatId) return res.status(400).json({ message: "Не передан chatId" });
 
     const chat = await Chat.findByPk(chatId);
-    if (!chat) {
-      return res.status(404).json({ message: "Чат не найден" });
-    }
+    if (!chat) return res.status(404).json({ message: "Чат не найден" });
 
     const numericLimit = Number(limit) || 50;
     const numericPage = Number(page) || 1;
@@ -149,6 +141,7 @@ export const getChatMessages = async (req, res) => {
       offset,
     });
 
+    // Помечаем как прочитанные
     if (userId) {
       await ChatMessage.update(
         { isRead: true },
@@ -186,14 +179,11 @@ export const getChatMessages = async (req, res) => {
     });
   } catch (e) {
     console.error("ERROR in getChatMessages:", e);
-    res.status(500).json({
-      message: "Ошибка загрузки сообщений",
-      error: e.message,
-    });
+    res.status(500).json({ message: "Ошибка", error: e.message });
   }
 };
 
-// @map: getAllChats (Все Чаты для админ-панели)
+// @map: getAllChats
 export const getAllChats = async (req, res) => {
   try {
     const { orderId, status } = req.query;
@@ -224,30 +214,23 @@ export const getAllChats = async (req, res) => {
     return res.json(chats);
   } catch (e) {
     console.error("Error fetching chats:", e);
-    res.status(500).json({ message: "Ошибка загрузки списка чатов" });
+    res.status(500).json({ message: "Ошибка" });
   }
 };
 
-// @map: getDriverChats (Чаты конкретного водителя)
+// @map: getDriverChats
 export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
-
-    if (!driverId) {
-      return res.status(401).json({ message: "Не авторизован" });
-    }
+    if (!driverId) return res.status(401).json({ message: "Не авторизован" });
 
     const { status } = req.query;
-
     const where = {
       [Op.or]: [{ driverId: driverId }, { type: "broadcast" }],
     };
 
-    if (status) {
-      where.status = status;
-    } else {
-      where.status = { [Op.ne]: "archived" };
-    }
+    if (status) where.status = status;
+    else where.status = { [Op.ne]: "archived" };
 
     const chats = await Chat.findAll({
       where,
@@ -258,46 +241,31 @@ export const getDriverChats = async (req, res) => {
           limit: 1,
           order: [["createdAt", "DESC"]],
         },
-        {
-          model: Client,
-          as: "client",
-          attributes: ["name", "phone"],
-        },
+        { model: Client, as: "client", attributes: ["name", "phone"] },
         {
           model: Driver,
           as: "driver",
           attributes: ["firstName", "lastName", "phone"],
         },
-        {
-          model: Order,
-          as: "order",
-          attributes: ["publicNumber", "status"],
-        },
+        { model: Order, as: "order", attributes: ["publicNumber", "status"] },
       ],
       order: [["updatedAt", "DESC"]],
     });
 
     return res.json(chats);
   } catch (e) {
-    console.error("CRITICAL ERROR in getDriverChats:", e);
-    res.status(500).json({
-      message: "Ошибка загрузки списка чатов водителя",
-      error: e.message,
-    });
+    console.error("Error getDriverChats:", e);
+    res.status(500).json({ message: "Ошибка", error: e.message });
   }
 };
 
-/**
- * @map: createSupportChatWithDriver (Чат Водитель <-> Админ + Первое сообщение)
- */
+// @map: createSupportChatWithDriver
 export const createSupportChatWithDriver = async (req, res) => {
   try {
     const { driverId, adminId, content, senderRole, senderId } = req.body;
 
     if (!driverId || !content || !senderRole || !senderId) {
-      return res.status(400).json({
-        message: "Необходимы driverId, content, senderRole и senderId",
-      });
+      return res.status(400).json({ message: "Неполные данные" });
     }
 
     let chat = await Chat.findOne({
@@ -329,18 +297,12 @@ export const createSupportChatWithDriver = async (req, res) => {
 
     await chat.update({ updatedAt: new Date() });
 
-    // 🔥 REAL-TIME: Отправляем через сокеты
+    // 🔥 REAL-TIME PUSH
     emitSocketMessage(req, chat.id, message);
 
-    return res.status(201).json({
-      chat,
-      message,
-    });
+    return res.status(201).json({ chat, message });
   } catch (e) {
-    console.error("Error in createSupportChatWithDriver:", e);
-    res.status(500).json({
-      message: "Ошибка при создании чата с поддержкой",
-      error: e.message,
-    });
+    console.error("Error createSupportChatWithDriver:", e);
+    res.status(500).json({ message: "Ошибка", error: e.message });
   }
 };
