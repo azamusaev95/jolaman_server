@@ -32,10 +32,10 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 
   // Важно: только websocket
-  transports: ["websocket"],
+  transports: ["websocket", "polling"],
 
   // Запрещаем апгрейды (т.к. polling выключен — upgrade нам не нужен)
-  allowUpgrades: false,
+  // allowUpgrades: false,
 
   // Тайминги
   pingTimeout: 60000,
