@@ -6,22 +6,26 @@ import Driver from "../driver/driver.model.js";
 import { Op } from "sequelize";
 
 /**
- * Вспомогательная функция отправки сообщения через сокет
+ * Отправляет сообщение и участникам чата, и всем админам
  */
 const emitSocketMessage = (req, chatId, message) => {
   try {
     const io = req.app.get("io");
     if (io) {
-      const roomName = String(chatId); // Гарантируем строку
-      console.log(
-        `📡 [SOCKET EMIT] Sending 'new_message' to room: ${roomName}`
-      );
+      const roomName = String(chatId);
+
+      // 1. Отправляем в комнату чата (Водителю/Клиенту)
       io.to(roomName).emit("new_message", message);
+
+      // 2. Отправляем в глобальный канал админов
+      io.to("admins").emit("new_message", message);
+
+      console.log(`📡 [SOCKET] Broadcasted to room '${roomName}' AND 'admins'`);
     } else {
-      console.error("❌ [SOCKET ERROR] IO instance not found in req.app");
+      console.error("❌ [SOCKET ERROR] IO not found");
     }
   } catch (err) {
-    console.error("❌ [SOCKET ERROR] Emit failed:", err);
+    console.error("❌ [SOCKET ERROR]", err);
   }
 };
 
@@ -31,21 +35,15 @@ export const getOrCreateOrderChat = async (req, res) => {
     const { orderId, clientId, driverId } = req.body;
 
     if (!orderId || !clientId || !driverId) {
-      return res.status(400).json({
-        message: "Нужно передать orderId, clientId и driverId",
-      });
+      return res.status(400).json({ message: "Неполные данные" });
     }
 
     let chat = await Chat.findOne({
       where: { orderId },
       include: [
-        { model: Client, as: "client", attributes: ["name", "phone"] },
-        {
-          model: Driver,
-          as: "driver",
-          attributes: ["firstName", "lastName", "phone"],
-        },
-        { model: Order, as: "order", attributes: ["publicNumber", "status"] },
+        { model: Client, as: "client" },
+        { model: Driver, as: "driver" },
+        { model: Order, as: "order" },
       ],
     });
 
@@ -60,21 +58,17 @@ export const getOrCreateOrderChat = async (req, res) => {
 
       chat = await Chat.findByPk(newChat.id, {
         include: [
-          { model: Client, as: "client", attributes: ["name", "phone"] },
-          {
-            model: Driver,
-            as: "driver",
-            attributes: ["firstName", "lastName", "phone"],
-          },
-          { model: Order, as: "order", attributes: ["publicNumber", "status"] },
+          { model: Client, as: "client" },
+          { model: Driver, as: "driver" },
+          { model: Order, as: "order" },
         ],
       });
     }
 
     return res.json(chat);
   } catch (e) {
-    console.error("Error creating chat:", e);
-    res.status(500).json({ message: "Ошибка при создании чата" });
+    console.error(e);
+    res.status(500).json({ message: "Error" });
   }
 };
 
@@ -84,19 +78,16 @@ export const sendMessage = async (req, res) => {
     const { chatId } = req.params;
     const { senderId, senderRole, content, contentType = "text" } = req.body;
 
-    if (!chatId) return res.status(400).json({ message: "Не передан chatId" });
-    if (!senderId || !senderRole || !content) {
-      return res.status(400).json({ message: "Неполные данные" });
-    }
+    if (!chatId) return res.status(400).json({ message: "No chatId" });
+    if (!content) return res.status(400).json({ message: "No content" });
 
     const chat = await Chat.findByPk(chatId);
-    if (!chat) return res.status(404).json({ message: "Чат не найден" });
+    if (!chat) return res.status(404).json({ message: "Chat not found" });
 
     if (chat.status === "closed") {
-      return res.status(403).json({ message: "Чат закрыт" });
+      return res.status(403).json({ message: "Chat closed" });
     }
 
-    // Создаём сообщение в БД
     const message = await ChatMessage.create({
       chatId,
       senderId,
@@ -105,16 +96,15 @@ export const sendMessage = async (req, res) => {
       contentType,
     });
 
-    // Обновляем время чата
     await Chat.update({ updatedAt: new Date() }, { where: { id: chatId } });
 
-    // 🔥 REAL-TIME PUSH
+    // 🔥 ОТПРАВКА СОКЕТА
     emitSocketMessage(req, chatId, message);
 
     return res.json(message);
   } catch (e) {
-    console.error("Error sending message:", e);
-    res.status(500).json({ message: "Ошибка отправки сообщения" });
+    console.error(e);
+    res.status(500).json({ message: "Send error" });
   }
 };
 
@@ -125,14 +115,11 @@ export const getChatMessages = async (req, res) => {
     const { page = 1, limit = 50 } = req.query;
     const userId = req.user?.id;
 
-    if (!chatId) return res.status(400).json({ message: "Не передан chatId" });
+    const numericLimit = Number(limit) || 50;
+    const offset = (Number(page) - 1) * numericLimit;
 
     const chat = await Chat.findByPk(chatId);
-    if (!chat) return res.status(404).json({ message: "Чат не найден" });
-
-    const numericLimit = Number(limit) || 50;
-    const numericPage = Number(page) || 1;
-    const offset = (numericPage - 1) * numericLimit;
+    if (!chat) return res.status(404).json({ message: "Chat not found" });
 
     const messages = await ChatMessage.findAndCountAll({
       where: { chatId },
@@ -141,45 +128,25 @@ export const getChatMessages = async (req, res) => {
       offset,
     });
 
-    // Помечаем как прочитанные
     if (userId) {
       await ChatMessage.update(
         { isRead: true },
-        {
-          where: {
-            chatId,
-            isRead: false,
-            senderId: { [Op.ne]: userId },
-          },
-        }
+        { where: { chatId, isRead: false, senderId: { [Op.ne]: userId } } }
       );
     }
 
     return res.json({
-      chat: {
-        id: chat.id,
-        type: chat.type,
-        status: chat.status,
-        title: chat.title,
-        orderId: chat.orderId,
-        clientId: chat.clientId,
-        driverId: chat.driverId,
-        adminId: chat.adminId,
-        canReply:
-          chat.status === "active" &&
-          !["broadcast", "system"].includes(chat.type),
-      },
+      chat,
       items: messages.rows,
       pagination: {
         total: messages.count,
-        page: numericPage,
+        page: Number(page),
         limit: numericLimit,
-        totalPages: Math.ceil(messages.count / numericLimit),
       },
     });
   } catch (e) {
-    console.error("ERROR in getChatMessages:", e);
-    res.status(500).json({ message: "Ошибка", error: e.message });
+    console.error(e);
+    res.status(500).json({ message: "Error fetching messages" });
   }
 };
 
@@ -213,8 +180,7 @@ export const getAllChats = async (req, res) => {
 
     return res.json(chats);
   } catch (e) {
-    console.error("Error fetching chats:", e);
-    res.status(500).json({ message: "Ошибка" });
+    res.status(500).json({ message: "Error" });
   }
 };
 
@@ -222,12 +188,8 @@ export const getAllChats = async (req, res) => {
 export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
-    if (!driverId) return res.status(401).json({ message: "Не авторизован" });
-
     const { status } = req.query;
-    const where = {
-      [Op.or]: [{ driverId: driverId }, { type: "broadcast" }],
-    };
+    const where = { [Op.or]: [{ driverId }, { type: "broadcast" }] };
 
     if (status) where.status = status;
     else where.status = { [Op.ne]: "archived" };
@@ -241,21 +203,16 @@ export const getDriverChats = async (req, res) => {
           limit: 1,
           order: [["createdAt", "DESC"]],
         },
-        { model: Client, as: "client", attributes: ["name", "phone"] },
-        {
-          model: Driver,
-          as: "driver",
-          attributes: ["firstName", "lastName", "phone"],
-        },
-        { model: Order, as: "order", attributes: ["publicNumber", "status"] },
+        { model: Client, as: "client" },
+        { model: Driver, as: "driver" },
+        { model: Order, as: "order" },
       ],
       order: [["updatedAt", "DESC"]],
     });
 
     return res.json(chats);
   } catch (e) {
-    console.error("Error getDriverChats:", e);
-    res.status(500).json({ message: "Ошибка", error: e.message });
+    res.status(500).json({ message: "Error" });
   }
 };
 
@@ -264,17 +221,8 @@ export const createSupportChatWithDriver = async (req, res) => {
   try {
     const { driverId, adminId, content, senderRole, senderId } = req.body;
 
-    if (!driverId || !content || !senderRole || !senderId) {
-      return res.status(400).json({ message: "Неполные данные" });
-    }
-
     let chat = await Chat.findOne({
-      where: {
-        type: "support_driver",
-        driverId,
-        status: "active",
-        adminId: adminId || null,
-      },
+      where: { type: "support_driver", driverId, status: "active" },
     });
 
     if (!chat) {
@@ -283,7 +231,7 @@ export const createSupportChatWithDriver = async (req, res) => {
         driverId,
         adminId: adminId || null,
         status: "active",
-        title: `Поддержка: Водитель ID ${driverId.slice(0, 8)}`,
+        title: `Поддержка`,
       });
     }
 
@@ -297,12 +245,12 @@ export const createSupportChatWithDriver = async (req, res) => {
 
     await chat.update({ updatedAt: new Date() });
 
-    // 🔥 REAL-TIME PUSH
+    // 🔥 ОТПРАВКА СОКЕТА
     emitSocketMessage(req, chat.id, message);
 
     return res.status(201).json({ chat, message });
   } catch (e) {
-    console.error("Error createSupportChatWithDriver:", e);
-    res.status(500).json({ message: "Ошибка", error: e.message });
+    console.error(e);
+    res.status(500).json({ message: "Error" });
   }
 };
