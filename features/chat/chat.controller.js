@@ -11,19 +11,20 @@ import { Op } from "sequelize";
 const emitSocketMessage = (req, chatId, message) => {
   try {
     const io = req.app.get("io");
-    if (io) {
-      const roomName = String(chatId);
-
-      // 1. Отправляем в комнату чата (Водителю/Клиенту)
-      io.to(roomName).emit("new_message", message);
-
-      // 2. Отправляем в глобальный канал админов
-      io.to("admins").emit("new_message", message);
-
-      console.log(`📡 [SOCKET] Broadcasted to room '${roomName}' AND 'admins'`);
-    } else {
+    if (!io) {
       console.error("❌ [SOCKET ERROR] IO not found");
+      return;
     }
+
+    const roomName = String(chatId);
+
+    // 1) В комнату чата (участникам)
+    io.to(roomName).emit("new_message", message);
+
+    // 2) Всем админам (кто реально сделал join_admin)
+    io.to("admins").emit("new_message", message);
+
+    console.log(`📡 [SOCKET] Broadcasted to room '${roomName}' AND 'admins'`);
   } catch (err) {
     console.error("❌ [SOCKET ERROR]", err);
   }
@@ -84,6 +85,13 @@ export const sendMessage = async (req, res) => {
     const chat = await Chat.findByPk(chatId);
     if (!chat) return res.status(404).json({ message: "Chat not found" });
 
+    // ✅ Запрет на ответы в broadcast/system на уровне API
+    if (["broadcast", "system"].includes(chat.type)) {
+      return res
+        .status(403)
+        .json({ message: "Replies are not allowed in this chat" });
+    }
+
     if (chat.status === "closed") {
       return res.status(403).json({ message: "Chat closed" });
     }
@@ -135,8 +143,15 @@ export const getChatMessages = async (req, res) => {
       );
     }
 
+    // ✅ Отдаем canReply, чтобы RN UI работал правильно
+    const canReply =
+      chat.status !== "closed" && !["broadcast", "system"].includes(chat.type);
+
     return res.json({
-      chat,
+      chat: {
+        ...chat.toJSON(),
+        canReply,
+      },
       items: messages.rows,
       pagination: {
         total: messages.count,

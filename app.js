@@ -30,6 +30,7 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   pingTimeout: 60000,
   pingInterval: 25000,
+  // path: "/socket.io", // можно раскомментить, если прокси требует явный path
 });
 
 // 2. СОХРАНЕНИЕ IO В APP
@@ -94,7 +95,7 @@ app.use("/api/selfie-control", selfieControlRoutes);
 io.on("connection", (socket) => {
   originalConsole.log(`🔌 [SOCKET] New connection: ${socket.id}`);
 
-  // 👇 НОВОЕ: Вход в канал админов
+  // Вход в канал админов
   socket.on("join_admin", () => {
     socket.join("admins");
     originalConsole.log(`🛡️ [SOCKET] ${socket.id} joined ADMIN channel`);
@@ -102,15 +103,16 @@ io.on("connection", (socket) => {
 
   // Вход в конкретный чат
   socket.on("join_chat", (chatId) => {
-    if (chatId) {
-      const roomName = String(chatId);
-      socket.join(roomName);
-      originalConsole.log(`📂 [SOCKET] ${socket.id} joined room: ${roomName}`);
-    }
+    if (!chatId) return;
+    const roomName = String(chatId);
+    socket.join(roomName);
+    originalConsole.log(`📂 [SOCKET] ${socket.id} joined room: ${roomName}`);
   });
 
-  socket.on("disconnect", () => {
-    originalConsole.log(`❌ [SOCKET] Disconnected: ${socket.id}`);
+  socket.on("disconnect", (reason) => {
+    originalConsole.log(
+      `❌ [SOCKET] Disconnected: ${socket.id} | reason=${reason}`
+    );
   });
 });
 
