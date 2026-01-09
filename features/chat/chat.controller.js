@@ -351,38 +351,53 @@ export const getAllChats = async (req, res) => {
 
     if (!chats.length) return res.json([]);
 
-    const chatIds = chats.map((c) => c.id);
+    // broadcast НЕ учитываем вообще
+    const isBroadcastType = (t) =>
+      t === "broadcast_driver" || t === "broadcast_client";
 
-    // 2) Последние "чужие" для админа = senderRole !== "admin"
-    const foreignMessages = await ChatMessage.findAll({
-      where: {
-        chatId: { [Op.in]: chatIds },
-        senderRole: { [Op.ne]: "admin" }, // ✅ ключевой фильтр для админки
-      },
-      order: [["createdAt", "DESC"]],
-    });
+    const nonBroadcastChats = chats.filter((c) => !isBroadcastType(c.type));
+    const nonBroadcastChatIds = nonBroadcastChats.map((c) => c.id);
 
-    // 3) Берём самое новое чужое сообщение на каждый chatId
-    const lastForeignByChatId = {};
-    for (const msg of foreignMessages) {
-      if (!lastForeignByChatId[msg.chatId]) {
-        lastForeignByChatId[msg.chatId] = msg;
+    // 2) Последние "чужие" для админа (только для НЕ-broadcast)
+    let lastForeignByChatId = {};
+    if (nonBroadcastChatIds.length) {
+      const foreignMessages = await ChatMessage.findAll({
+        where: {
+          chatId: { [Op.in]: nonBroadcastChatIds },
+          senderRole: { [Op.ne]: "admin" }, // ✅ "чужие" для админа
+        },
+        order: [["createdAt", "DESC"]],
+      });
+
+      // берём самое новое чужое сообщение на каждый chatId
+      for (const msg of foreignMessages) {
+        if (!lastForeignByChatId[msg.chatId]) {
+          lastForeignByChatId[msg.chatId] = msg;
+        }
       }
     }
 
-    // helper: безопасно конвертим дату в ms
     const toMs = (v) => {
       if (!v) return null;
       const t = new Date(v).getTime();
       return Number.isFinite(t) ? t : null;
     };
 
-    // 4) Склеиваем результат
+    // 3) Склеиваем результат
     const result = chats.map((chat) => {
       const plain = chat.toJSON();
-      const lastForeign = lastForeignByChatId[chat.id] || null;
 
-      // 5) Индикатор непрочитанного для админа (удобно для UI)
+      // broadcast: ничего не считаем/не добавляем
+      if (isBroadcastType(plain.type)) {
+        return {
+          ...plain,
+          lastForeignMessage: null,
+          hasUnreadForAdmin: false,
+        };
+      }
+
+      const lastForeign = lastForeignByChatId[plain.id] || null;
+
       const lastForeignMs = toMs(lastForeign?.createdAt);
       const adminReadMs = toMs(plain.adminLastReadAt);
 
