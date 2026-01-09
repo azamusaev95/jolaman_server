@@ -340,46 +340,106 @@ export const getAllChats = async (req, res) => {
 // LIST CHATS (driver app)
 // ======================================================
 
-export const getDriverChats = async (req, res) => {
+// @map: getChatMessages
+export const getChatMessages = async (req, res) => {
   try {
-    const driverId = req.user?.id;
+    const { chatId } = req.params;
+    const { page = 1, limit = 50 } = req.query;
 
-    if (!driverId) {
-      return res.status(401).json({ message: "Пользователь не авторизован" });
+    // ИЗМЕНЕНО: Достал userId и добавил лог
+    const userId = req.user?.id;
+
+    const numericLimit = Number(limit) || 50;
+    const offset = (Number(page) - 1) * numericLimit;
+
+    const chat = await Chat.findByPk(chatId);
+    if (!chat) return res.status(404).json({ message: "Chat not found" });
+
+    // ======================================================
+    //  DEBUG BLOCK
+    // ======================================================
+    console.log("--- DEBUG READ STATUS ---");
+    console.log("Chat ID:", chatId);
+    console.log("User ID from Token:", userId, "| Type:", typeof userId);
+    console.log(
+      "Driver ID from DB:",
+      chat.driverId,
+      "| Type:",
+      typeof chat.driverId
+    );
+
+    // ПРОВЕРКА: Если userId вообще пустой - значит проблема в middleware авторизации
+    if (!userId) {
+      console.error(
+        "❌ ERROR: req.user.id is UNDEFINED. Check your auth middleware!"
+      );
+    }
+    // ======================================================
+
+    const messages = await ChatMessage.findAndCountAll({
+      where: { chatId },
+      order: [["createdAt", "ASC"]],
+      limit: numericLimit,
+      offset,
+    });
+
+    if (userId) {
+      await ChatMessage.update(
+        { isRead: true },
+        { where: { chatId, isRead: false, senderId: { [Op.ne]: userId } } }
+      );
     }
 
-    const where = {
-      [Op.or]: [
-        { driverId },
-        { type: "broadcast_driver" },
-        { type: "system_driver", driverId },
-      ],
-    };
+    // ИЗМЕНЕНО: Принудительное приведение к строке для точного сравнения
+    const isDriver =
+      userId &&
+      chat.driverId &&
+      String(userId).trim() === String(chat.driverId).trim();
 
-    const chats = await Chat.findAll({
-      where,
-      include: [
-        {
-          model: ChatMessage,
-          as: "messages",
-          limit: 1,
-          order: [["createdAt", "DESC"]],
-        },
-        { model: Client, as: "client" },
-        { model: Driver, as: "driver" },
-        { model: Order, as: "order" },
-      ],
-      // Сортируем так, чтобы последние обновленные были сверху
-      order: [["updatedAt", "DESC"]],
+    console.log("Is current user the driver?:", isDriver);
+
+    if (isDriver) {
+      // ИЗМЕНЕНО: Обновление driverLastReadAt
+      const updateResult = await chat.update({
+        driverLastReadAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // ДОБАВЛЕНО: Проверка, что записалось в объект после update
+      console.log(
+        "✅ Update executed. New driverLastReadAt:",
+        updateResult.driverLastReadAt
+      );
+    } else {
+      console.log("⚠️ Update SKIPPED: User is not the driver of this chat.");
+    }
+
+    const canReply =
+      chat.status !== "closed" &&
+      ![
+        "broadcast_driver",
+        "broadcast_client",
+        "system_driver",
+        "system_client",
+      ].includes(chat.type);
+
+    const freshChat = await Chat.findByPk(chatId);
+
+    return res.json({
+      chat: {
+        ...freshChat.toJSON(),
+        canReply,
+      },
+      items: messages.rows,
+      pagination: {
+        total: messages.count,
+        page: Number(page),
+        limit: numericLimit,
+      },
     });
-
-    return res.json(chats);
   } catch (e) {
-    console.error("❌ ERROR in getDriverChats:", e);
-    res.status(500).json({
-      message: "Ошибка при получении всех чатов",
-      error: e.message,
-    });
+    console.error("❌ ERROR in getChatMessages:", e);
+    res.status(500).json({ message: "Error fetching messages" });
   }
 };
 
