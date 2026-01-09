@@ -328,6 +328,7 @@ export const getAllChats = async (req, res) => {
     if (status) where.status = status;
     if (type) where.type = type;
 
+    // 1) Чаты + последнее сообщение вообще (для превью)
     const chats = await Chat.findAll({
       where,
       include: [
@@ -348,8 +349,56 @@ export const getAllChats = async (req, res) => {
       order: [["updatedAt", "DESC"]],
     });
 
-    return res.json(chats);
+    if (!chats.length) return res.json([]);
+
+    const chatIds = chats.map((c) => c.id);
+
+    // 2) Последние "чужие" для админа = senderRole !== "admin"
+    const foreignMessages = await ChatMessage.findAll({
+      where: {
+        chatId: { [Op.in]: chatIds },
+        senderRole: { [Op.ne]: "admin" }, // ✅ ключевой фильтр для админки
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    // 3) Берём самое новое чужое сообщение на каждый chatId
+    const lastForeignByChatId = {};
+    for (const msg of foreignMessages) {
+      if (!lastForeignByChatId[msg.chatId]) {
+        lastForeignByChatId[msg.chatId] = msg;
+      }
+    }
+
+    // helper: безопасно конвертим дату в ms
+    const toMs = (v) => {
+      if (!v) return null;
+      const t = new Date(v).getTime();
+      return Number.isFinite(t) ? t : null;
+    };
+
+    // 4) Склеиваем результат
+    const result = chats.map((chat) => {
+      const plain = chat.toJSON();
+      const lastForeign = lastForeignByChatId[chat.id] || null;
+
+      // 5) Индикатор непрочитанного для админа (удобно для UI)
+      const lastForeignMs = toMs(lastForeign?.createdAt);
+      const adminReadMs = toMs(plain.adminLastReadAt);
+
+      const hasUnreadForAdmin =
+        !!lastForeignMs && (!adminReadMs || lastForeignMs > adminReadMs);
+
+      return {
+        ...plain,
+        lastForeignMessage: lastForeign,
+        hasUnreadForAdmin,
+      };
+    });
+
+    return res.json(result);
   } catch (e) {
+    console.error("ERROR in getAllChats:", e);
     res.status(500).json({ message: "Error" });
   }
 };
@@ -362,27 +411,21 @@ export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
 
-    console.log("DEBUG: Fetching ALL chats for driverId:", driverId);
+    console.log("[getDriverChats] driverId:", driverId);
 
     if (!driverId) {
-      return res
-        .status(401)
-        .json({ message: `polzovatel ne avtorizovan ${driverId}` });
+      return res.status(401).json({ message: "Driver not authorized" });
     }
 
     const where = {
       [Op.or]: [
-        { driverId },
+        { driverId }, // order/support_driver/и т.п.
         { type: "broadcast_driver" },
         { type: "system_driver", driverId },
       ],
     };
 
-    console.log(
-      "DEBUG: Final WHERE clause (no status filter):",
-      JSON.stringify(where, null, 2)
-    );
-
+    // 1) Чаты + последнее сообщение вообще (для превью)
     const chats = await Chat.findAll({
       where,
       include: [
@@ -399,13 +442,55 @@ export const getDriverChats = async (req, res) => {
       order: [["updatedAt", "DESC"]],
     });
 
-    console.log(`DEBUG: Found ${chats.length} chats total`);
+    console.log(`[getDriverChats] chats found: ${chats.length}`);
 
-    return res.json(chats);
+    if (!chats.length) return res.json([]);
+
+    const chatIds = chats.map((c) => c.id);
+
+    // 2) Одним запросом достаём все "чужие" сообщения (НЕ driver)
+    const foreignMessages = await ChatMessage.findAll({
+      where: {
+        chatId: { [Op.in]: chatIds },
+        senderRole: { [Op.ne]: "driver" }, // ✅ ключевой фильтр
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    // 3) Берём самое новое чужое сообщение на каждый chatId
+    const lastForeignByChatId = {};
+    for (const msg of foreignMessages) {
+      if (!lastForeignByChatId[msg.chatId]) {
+        lastForeignByChatId[msg.chatId] = msg;
+      }
+    }
+
+    // 4) Склеиваем результат: оставляем messages[0] и добавляем lastForeignMessage
+    const result = chats.map((chat) => {
+      const plain = chat.toJSON();
+      return {
+        ...plain,
+        lastForeignMessage: lastForeignByChatId[chat.id] || null,
+      };
+    });
+
+    console.log(
+      "[getDriverChats] sample:",
+      result.slice(0, 5).map((c) => ({
+        chatId: c.id,
+        lastMsgRole: c.messages?.[0]?.senderRole || null,
+        lastMsgAt: c.messages?.[0]?.createdAt || null,
+        lastForeignRole: c.lastForeignMessage?.senderRole || null,
+        lastForeignAt: c.lastForeignMessage?.createdAt || null,
+        driverLastReadAt: c.driverLastReadAt || null,
+      }))
+    );
+
+    return res.json(result);
   } catch (e) {
     console.error("ERROR in getDriverChats:", e);
-    res.status(500).json({
-      message: "Ошибка при получении всех чатов",
+    return res.status(500).json({
+      message: "Ошибка при получении чатов водителя",
       error: e.message,
     });
   }
