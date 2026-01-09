@@ -13,6 +13,28 @@ const READ_ONLY_TYPES = new Set([
 ]);
 
 // ======================================================
+// ROLE NORMALIZATION
+// ======================================================
+
+/**
+ * Приводим роли к каноническим значениям для логики read-state:
+ * - system / superadmin / dispatcher -> admin
+ * - driver / client / admin -> как есть
+ * - всё остальное -> null
+ */
+const normalizeRole = (role) => {
+  if (typeof role !== "string") return null;
+
+  const r = role.toLowerCase().trim();
+  if (!r) return null;
+
+  if (["system", "superadmin", "dispatcher"].includes(r)) return "admin";
+  if (["admin", "driver", "client"].includes(r)) return r;
+
+  return null;
+};
+
+// ======================================================
 // SOCKET HELPERS
 // ======================================================
 
@@ -80,22 +102,11 @@ const emitAudiencePush = (req, chat, message) => {
  * Возвращает: "driver" | "client" | "admin"
  */
 const resolveActorRole = (req, chat, senderRole) => {
-  const roleFromBody = typeof senderRole === "string" ? senderRole : null;
+  const roleFromBody = normalizeRole(senderRole);
+  if (roleFromBody) return roleFromBody;
 
-  if (
-    roleFromBody &&
-    ["driver", "client", "admin", "system"].includes(roleFromBody)
-  ) {
-    return roleFromBody === "system" ? "admin" : roleFromBody;
-  }
-
-  const roleFromReq = req.user?.role;
-  if (
-    roleFromReq &&
-    ["driver", "client", "admin", "system"].includes(roleFromReq)
-  ) {
-    return roleFromReq === "system" ? "admin" : roleFromReq;
-  }
+  const roleFromReq = normalizeRole(req.user?.role);
+  if (roleFromReq) return roleFromReq;
 
   const userId = req.user?.id;
   if (userId && chat?.driverId && String(chat.driverId) === String(userId))
@@ -267,13 +278,14 @@ export const getChatMessages = async (req, res) => {
       );
     }
 
-    // ✅ Вариант A: прямо тут (без global функций) обновляем нужный *LastReadAt по роли из middleware
+    // ✅ Вариант A: обновляем нужный *LastReadAt по роли из middleware
     // ВАЖНО: broadcast_* нельзя трогать driver/client lastReadAt, иначе "прочитал один = прочитали все"
     const now = new Date();
     const isBroadcast =
       chat.type === "broadcast_driver" || chat.type === "broadcast_client";
 
-    const userRole = userRoleRaw === "system" ? "admin" : userRoleRaw; // на всякий случай
+    // normalize: system/dispatcher/superadmin -> admin
+    const userRole = normalizeRole(userRoleRaw) || "admin";
 
     if (isBroadcast) {
       // для broadcast разрешаем обновлять только adminLastReadAt (и то если реально админ)
