@@ -10,6 +10,7 @@ import {
   createBroadcastChat,
   createSystemChat,
 } from "./chat.controller.js";
+import { authDriver } from "../middlwares/authDriver.js";
 
 const router = Router();
 
@@ -22,7 +23,7 @@ router.get("/:chatId/messages", getChatMessages);
 
 // LISTS
 router.get("/", getAllChats);
-router.get("/driver", getDriverChats);
+router.get("/driver", authDriver, getDriverChats);
 
 // SUPPORT
 router.post("/support/driver", createSupportChatWithDriver);
