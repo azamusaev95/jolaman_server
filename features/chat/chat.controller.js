@@ -258,14 +258,15 @@ export const getDriverChats = async (req, res) => {
     const driverId = req.user?.id;
     const { status } = req.query;
 
-    if (!driverId) {
-      return res.status(401).json({ message: "Unauthorized: no driverId" });
-    }
-
+    // водитель видит:
+    // - свои чаты (driverId)
+    // - рассылку водителям (broadcast_driver)
+    // system_driver будет и так по driverId, но оставим явно тоже
     const where = {
       [Op.or]: [
-        { driverId }, // все личные чаты водителя (order/support/system_driver и т.п.)
-        { type: "broadcast_driver" }, // глобальная рассылка водителям
+        { driverId },
+        { type: "broadcast_driver" },
+        { type: "system_driver", driverId },
       ],
     };
 
@@ -278,8 +279,6 @@ export const getDriverChats = async (req, res) => {
         {
           model: ChatMessage,
           as: "messages",
-          separate: true, // ✅ КРИТИЧНО: иначе limit ломает выборку чатов
-          limit: 1,
           order: [["createdAt", "DESC"]],
         },
         { model: Client, as: "client" },
@@ -291,7 +290,6 @@ export const getDriverChats = async (req, res) => {
 
     return res.json(chats);
   } catch (e) {
-    console.error(e);
     res.status(500).json({ message: "Error" });
   }
 };
