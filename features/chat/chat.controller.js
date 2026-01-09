@@ -252,16 +252,18 @@ export const getAllChats = async (req, res) => {
 // LIST CHATS (driver app)
 // ======================================================
 
-// @map: getDriverChats
 export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
-    const { status } = req.query;
+    // const { status } = req.query; // УДАЛЕНО: пока не используем фильтрацию по статусу
 
-    // водитель видит:
-    // - свои чаты (driverId)
-    // - рассылку водителям (broadcast_driver)
-    // system_driver будет и так по driverId, но оставим явно тоже
+    console.log("DEBUG: Fetching ALL chats for driverId:", driverId);
+
+    if (!driverId) {
+      return res.status(401).json({ message: "Пользователь не авторизован" });
+    }
+
+    // ИЗМЕНЕНО: Теперь в where только условия по принадлежности чата, без статусов
     const where = {
       [Op.or]: [
         { driverId },
@@ -270,8 +272,13 @@ export const getDriverChats = async (req, res) => {
       ],
     };
 
-    if (status) where.status = status;
-    else where.status = { [Op.ne]: "archived" };
+    // УДАЛЕНО: Блок if (status) { ... } else { where.status = ... }
+    // Теперь статус не фильтруется, придут и активные, и архивные чаты.
+
+    console.log(
+      "DEBUG: Final WHERE clause (no status filter):",
+      JSON.stringify(where, null, 2)
+    );
 
     const chats = await Chat.findAll({
       where,
@@ -279,6 +286,7 @@ export const getDriverChats = async (req, res) => {
         {
           model: ChatMessage,
           as: "messages",
+          limit: 1,
           order: [["createdAt", "DESC"]],
         },
         { model: Client, as: "client" },
@@ -288,12 +296,17 @@ export const getDriverChats = async (req, res) => {
       order: [["updatedAt", "DESC"]],
     });
 
+    console.log(`DEBUG: Found ${chats.length} chats total`);
+
     return res.json(chats);
   } catch (e) {
-    res.status(500).json({ message: "Error" });
+    console.error("ERROR in getDriverChats:", e);
+    res.status(500).json({
+      message: "Ошибка при получении всех чатов",
+      error: e.message,
+    });
   }
 };
-
 // ======================================================
 // SUPPORT DRIVER
 // ======================================================
