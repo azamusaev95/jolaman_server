@@ -12,6 +12,10 @@ const READ_ONLY_TYPES = new Set([
   "system_client",
 ]);
 
+// ======================================================
+// SOCKET HELPERS
+// ======================================================
+
 /**
  * Отправляет сообщение:
  * - в комнату конкретного чата (chatId)
@@ -59,6 +63,65 @@ const emitAudiencePush = (req, chat, message) => {
     }
   } catch (e) {
     console.error("❌ [SOCKET AUDIENCE PUSH ERROR]", e);
+  }
+};
+
+// ======================================================
+// READ-STATE HELPERS
+// ======================================================
+
+/**
+ * Определяем роль действующего лица (кто открыл чат / кто отправил сообщение):
+ * - если есть senderRole (в body) — используем его
+ * - иначе сравниваем req.user.id с chat.driverId/chat.clientId
+ * - иначе считаем admin
+ *
+ * Возвращает: "driver" | "client" | "admin"
+ */
+const resolveActorRole = (req, chat, senderRole) => {
+  const roleFromBody = typeof senderRole === "string" ? senderRole : null;
+
+  if (
+    roleFromBody &&
+    ["driver", "client", "admin", "system"].includes(roleFromBody)
+  ) {
+    return roleFromBody === "system" ? "admin" : roleFromBody;
+  }
+
+  const userId = req.user?.id;
+  if (userId && chat?.driverId && String(chat.driverId) === String(userId))
+    return "driver";
+  if (userId && chat?.clientId && String(chat.clientId) === String(userId))
+    return "client";
+
+  return "admin";
+};
+
+/**
+ * Обновляем lastReadAt по роли.
+ * ВАЖНО: для broadcast_* нельзя ставить driver/client lastReadAt (иначе "прочитал один = прочитали все").
+ * Для broadcast разрешаем обновлять только adminLastReadAt.
+ */
+const touchChatReadAt = async (chat, actorRole) => {
+  if (!chat) return;
+
+  const now = new Date();
+  const isBroadcast =
+    chat.type === "broadcast_driver" || chat.type === "broadcast_client";
+
+  if (isBroadcast) {
+    if (actorRole === "admin") {
+      await chat.update({ adminLastReadAt: now });
+    }
+    return;
+  }
+
+  if (actorRole === "driver") {
+    await chat.update({ driverLastReadAt: now });
+  } else if (actorRole === "client") {
+    await chat.update({ clientLastReadAt: now });
+  } else {
+    await chat.update({ adminLastReadAt: now });
   }
 };
 
@@ -144,7 +207,12 @@ export const sendMessage = async (req, res) => {
       contentType,
     });
 
+    // Поднимаем чат в списках
     await Chat.update({ updatedAt: new Date() }, { where: { id: chatId } });
+
+    // ✅ Отправитель сам "видел" чат
+    const actorRole = resolveActorRole(req, chat, senderRole);
+    await touchChatReadAt(chat, actorRole);
 
     // 🔥 сокеты
     emitSocketMessage(req, chatId, message);
@@ -180,6 +248,7 @@ export const getChatMessages = async (req, res) => {
       offset,
     });
 
+    // Старое поведение: помечаем сообщения прочитанными (per-message)
     if (userId) {
       await ChatMessage.update(
         { isRead: true },
@@ -187,13 +256,20 @@ export const getChatMessages = async (req, res) => {
       );
     }
 
-    // ✅ canReply (RN)
+    // ✅ Новое: фиксируем read-state на уровне чата (для отображения в списках)
+    const actorRole = resolveActorRole(req, chat, null);
+    await touchChatReadAt(chat, actorRole);
+
+    // canReply (RN)
     const canReply =
       chat.status !== "closed" && !READ_ONLY_TYPES.has(chat.type);
 
+    // Возвращаем актуальные lastReadAt
+    const freshChat = await Chat.findByPk(chatId);
+
     return res.json({
       chat: {
-        ...chat.toJSON(),
+        ...freshChat.toJSON(),
         canReply,
       },
       items: messages.rows,
@@ -255,7 +331,6 @@ export const getAllChats = async (req, res) => {
 export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
-    // const { status } = req.query; // УДАЛЕНО: пока не используем фильтрацию по статусу
 
     console.log("DEBUG: Fetching ALL chats for driverId:", driverId);
 
@@ -265,7 +340,6 @@ export const getDriverChats = async (req, res) => {
         .json({ message: "Пользователь не авторизован", driverId });
     }
 
-    // ИЗМЕНЕНО: Теперь в where только условия по принадлежности чата, без статусов
     const where = {
       [Op.or]: [
         { driverId },
@@ -273,9 +347,6 @@ export const getDriverChats = async (req, res) => {
         { type: "system_driver", driverId },
       ],
     };
-
-    // УДАЛЕНО: Блок if (status) { ... } else { where.status = ... }
-    // Теперь статус не фильтруется, придут и активные, и архивные чаты.
 
     console.log(
       "DEBUG: Final WHERE clause (no status filter):",
@@ -309,6 +380,7 @@ export const getDriverChats = async (req, res) => {
     });
   }
 };
+
 // ======================================================
 // SUPPORT DRIVER
 // ======================================================
@@ -341,6 +413,10 @@ export const createSupportChatWithDriver = async (req, res) => {
     });
 
     await chat.update({ updatedAt: new Date() });
+
+    // ✅ Отправитель сам "видел" чат
+    const actorRole = resolveActorRole(req, chat, senderRole);
+    await touchChatReadAt(chat, actorRole);
 
     emitSocketMessage(req, chat.id, message);
 
@@ -380,6 +456,8 @@ export const createBroadcastChat = async (req, res) => {
       status: "active",
       title: title || null,
       adminId: adminId || senderId || null,
+      // Автор (админ) не должен видеть своё как "непрочитано"
+      adminLastReadAt: new Date(),
     });
 
     const message = await ChatMessage.create({
@@ -397,7 +475,6 @@ export const createBroadcastChat = async (req, res) => {
 
     // 2) всем по аудитории (drivers/clients) + админам
     emitAudiencePush(req, chat, message);
-    // admins уже получили через emitSocketMessage
 
     return res.status(201).json({ chat, message });
   } catch (e) {
@@ -446,6 +523,8 @@ export const createSystemChat = async (req, res) => {
       driverId: target === "driver" ? driverId : null,
       clientId: target === "client" ? clientId : null,
       adminId: adminId || senderId || null,
+      // Автор (админ/система) не должен видеть своё как "непрочитано"
+      adminLastReadAt: new Date(),
     });
 
     const message = await ChatMessage.create({

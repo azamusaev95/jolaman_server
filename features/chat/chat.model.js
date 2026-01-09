@@ -8,6 +8,11 @@
  * @field driverId {UUID} - Ссылка на Водителя (для order/support_driver/system_driver)
  * @field adminId {UUID} - Ссылка на Админа (кто создал/ведет поддержку/рассылку)
  * @field title {String} - Заголовок (например, "Акция: Бонус 10%")
+ *
+ * READ-STATE (для 1-на-1 чатов с разными ролями):
+ * @field driverLastReadAt {Date} - когда водитель последний раз открывал чат
+ * @field clientLastReadAt {Date} - когда клиент последний раз открывал чат
+ * @field adminLastReadAt {Date} - когда админ последний раз открывал чат
  */
 
 import { DataTypes } from "sequelize";
@@ -95,6 +100,35 @@ const Chat = sequelize.define(
       field: "admin_id",
       allowNull: true,
     },
+
+    /**
+     * ======================================================
+     * READ STATE
+     * ======================================================
+     * Храним "когда последний раз читали" для каждой роли.
+     * Это корректно для чатов 1-на-1 (order/support/system).
+     *
+     * ВАЖНО: Для broadcast_* (один чат на сотни пользователей) эти поля НЕ решают задачу
+     * "кто из водителей/клиентов прочитал" — там нужен отдельный механизм (например,
+     * хранить seen у Driver/Client или отдельную таблицу read-status).
+     */
+    driverLastReadAt: {
+      type: DataTypes.DATE,
+      field: "driver_last_read_at",
+      allowNull: true,
+    },
+
+    clientLastReadAt: {
+      type: DataTypes.DATE,
+      field: "client_last_read_at",
+      allowNull: true,
+    },
+
+    adminLastReadAt: {
+      type: DataTypes.DATE,
+      field: "admin_last_read_at",
+      allowNull: true,
+    },
   },
   {
     tableName: "chats",
@@ -133,7 +167,7 @@ Chat.belongsTo(Driver, {
 });
 
 console.log(
-  "🔗 Chat Model: Связи обновлены (broadcast_driver/broadcast_client/system_driver/system_client добавлены)"
+  "🔗 Chat Model: Связи обновлены (broadcast_driver/broadcast_client/system_driver/system_client добавлены). Read-state поля (driver/client/admin) добавлены."
 );
 
 export default Chat;
