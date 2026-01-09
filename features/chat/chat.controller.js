@@ -336,7 +336,7 @@ export const getChatMessages = async (req, res) => {
 // @map: getAllChats
 export const getAllChats = async (req, res) => {
   try {
-    const { orderId, status, type, limit = 10 } = req.query;
+    const { orderId, status, type, page = 1, limit = 10 } = req.query;
 
     const ALLOWED_CHAT_TYPES = new Set([
       "order",
@@ -353,20 +353,28 @@ export const getAllChats = async (req, res) => {
     }
 
     const numericLimit = Math.min(Number(limit) || 10, 100);
+    const numericPage = Math.max(Number(page) || 1, 1);
+    const offset = (numericPage - 1) * numericLimit;
 
     const where = {};
     if (orderId) where.orderId = orderId;
     if (status) where.status = status;
     if (type) where.type = type;
 
-    // 1) Чаты + последнее сообщение вообще (для превью)
+    // 🔹 Общее количество (для pagination)
+    const total = await Chat.count({ where });
+
+    // 🔹 Основной запрос с offset
     const chats = await Chat.findAll({
       where,
       limit: numericLimit,
+      offset,
+      order: [["updatedAt", "DESC"]],
       include: [
         {
           model: ChatMessage,
           as: "messages",
+          separate: true, // ❗ критично для корректной пагинации
           limit: 1,
           order: [["createdAt", "DESC"]],
         },
@@ -378,19 +386,28 @@ export const getAllChats = async (req, res) => {
         },
         { model: Order, as: "order", attributes: ["publicNumber", "status"] },
       ],
-      order: [["updatedAt", "DESC"]],
     });
 
-    if (!chats.length) return res.json([]);
+    if (!chats.length) {
+      return res.json({
+        items: [],
+        pagination: {
+          total,
+          page: numericPage,
+          limit: numericLimit,
+          hasMore: false,
+        },
+      });
+    }
 
-    // broadcast НЕ учитываем вообще
+    // broadcast НЕ учитываем вообще для unread
     const isBroadcastType = (t) =>
       t === "broadcast_driver" || t === "broadcast_client";
 
     const nonBroadcastChats = chats.filter((c) => !isBroadcastType(c.type));
     const nonBroadcastChatIds = nonBroadcastChats.map((c) => c.id);
 
-    // 2) Последние "чужие" для админа (только для НЕ-broadcast)
+    // 🔹 Последние "чужие" для админа
     let lastForeignByChatId = {};
     if (nonBroadcastChatIds.length) {
       const foreignMessages = await ChatMessage.findAll({
@@ -414,8 +431,7 @@ export const getAllChats = async (req, res) => {
       return Number.isFinite(t) ? t : null;
     };
 
-    // 3) Склеиваем результат
-    const result = chats.map((chat) => {
+    const items = chats.map((chat) => {
       const plain = chat.toJSON();
 
       if (isBroadcastType(plain.type)) {
@@ -441,7 +457,15 @@ export const getAllChats = async (req, res) => {
       };
     });
 
-    return res.json(result);
+    return res.json({
+      items,
+      pagination: {
+        total,
+        page: numericPage,
+        limit: numericLimit,
+        hasMore: offset + items.length < total,
+      },
+    });
   } catch (e) {
     console.error("ERROR in getAllChats:", e);
     res.status(500).json({ message: "Error" });
