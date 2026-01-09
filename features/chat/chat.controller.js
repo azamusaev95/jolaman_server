@@ -287,6 +287,8 @@ export const getChatMessages = async (req, res) => {
     // normalize: system/dispatcher/superadmin -> admin
     const userRole = normalizeRole(userRoleRaw) || "admin";
 
+    console.log(userRole, "USER ROLE IN GET MESSAGE");
+
     if (isBroadcast) {
       // для broadcast разрешаем обновлять только adminLastReadAt (и то если реально админ)
       if (userRole === "admin") {
@@ -334,7 +336,24 @@ export const getChatMessages = async (req, res) => {
 // @map: getAllChats
 export const getAllChats = async (req, res) => {
   try {
-    const { orderId, status, type } = req.query;
+    const { orderId, status, type, limit = 10 } = req.query;
+
+    const ALLOWED_CHAT_TYPES = new Set([
+      "order",
+      "support_client",
+      "support_driver",
+      "broadcast_driver",
+      "broadcast_client",
+      "system_driver",
+      "system_client",
+    ]);
+
+    if (type && !ALLOWED_CHAT_TYPES.has(type)) {
+      return res.status(400).json({ message: "Invalid chat type" });
+    }
+
+    const numericLimit = Math.min(Number(limit) || 10, 100);
+
     const where = {};
     if (orderId) where.orderId = orderId;
     if (status) where.status = status;
@@ -343,6 +362,7 @@ export const getAllChats = async (req, res) => {
     // 1) Чаты + последнее сообщение вообще (для превью)
     const chats = await Chat.findAll({
       where,
+      limit: numericLimit,
       include: [
         {
           model: ChatMessage,
@@ -376,12 +396,11 @@ export const getAllChats = async (req, res) => {
       const foreignMessages = await ChatMessage.findAll({
         where: {
           chatId: { [Op.in]: nonBroadcastChatIds },
-          senderRole: { [Op.ne]: "admin" }, // ✅ "чужие" для админа
+          senderRole: { [Op.ne]: "admin" },
         },
         order: [["createdAt", "DESC"]],
       });
 
-      // берём самое новое чужое сообщение на каждый chatId
       for (const msg of foreignMessages) {
         if (!lastForeignByChatId[msg.chatId]) {
           lastForeignByChatId[msg.chatId] = msg;
@@ -399,7 +418,6 @@ export const getAllChats = async (req, res) => {
     const result = chats.map((chat) => {
       const plain = chat.toJSON();
 
-      // broadcast: ничего не считаем/не добавляем
       if (isBroadcastType(plain.type)) {
         return {
           ...plain,
