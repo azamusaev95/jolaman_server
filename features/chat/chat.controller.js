@@ -72,9 +72,10 @@ const emitAudiencePush = (req, chat, message) => {
 
 /**
  * Определяем роль действующего лица (кто открыл чат / кто отправил сообщение):
- * - если есть senderRole (в body) — используем его
- * - иначе сравниваем req.user.id с chat.driverId/chat.clientId
- * - иначе считаем admin
+ * 1) если есть senderRole (в body) — используем его
+ * 2) иначе если есть req.user.role (после auth middleware) — используем её
+ * 3) иначе сравниваем req.user.id с chat.driverId/chat.clientId
+ * 4) иначе считаем admin
  *
  * Возвращает: "driver" | "client" | "admin"
  */
@@ -86,6 +87,14 @@ const resolveActorRole = (req, chat, senderRole) => {
     ["driver", "client", "admin", "system"].includes(roleFromBody)
   ) {
     return roleFromBody === "system" ? "admin" : roleFromBody;
+  }
+
+  const roleFromReq = req.user?.role;
+  if (
+    roleFromReq &&
+    ["driver", "client", "admin", "system"].includes(roleFromReq)
+  ) {
+    return roleFromReq === "system" ? "admin" : roleFromReq;
   }
 
   const userId = req.user?.id;
@@ -228,13 +237,14 @@ export const sendMessage = async (req, res) => {
 // GET MESSAGES
 // ======================================================
 
+// @map: getChatMessages
 export const getChatMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
     const { page = 1, limit = 50 } = req.query;
 
-    const userId = req.user?.id; // ID текущего пользователя из токена
-    const userRoleRaw = req.user?.role; // роль из токена
+    const userId = req.user?.id;
+    const userRoleRaw = req.user?.role; // после authDriver будет "driver"
 
     const numericLimit = Number(limit) || 50;
     const offset = (Number(page) - 1) * numericLimit;
@@ -249,7 +259,7 @@ export const getChatMessages = async (req, res) => {
       offset,
     });
 
-    // Помечаем все сообщения в чате как прочитанные (isRead = true)
+    // Старое поведение: помечаем сообщения прочитанными (per-message)
     if (userId) {
       await ChatMessage.update(
         { isRead: true },
@@ -257,20 +267,19 @@ export const getChatMessages = async (req, res) => {
       );
     }
 
-    // ✅ NEW: обновляем *LastReadAt напрямую по роли из токена (без глобальных хелперов)
-    // ВАЖНО: broadcast_* нельзя трогать driver/client lastReadAt, иначе "прочитал один = прочитали все".
+    // ✅ Вариант A: прямо тут (без global функций) обновляем нужный *LastReadAt по роли из middleware
+    // ВАЖНО: broadcast_* нельзя трогать driver/client lastReadAt, иначе "прочитал один = прочитали все"
     const now = new Date();
     const isBroadcast =
       chat.type === "broadcast_driver" || chat.type === "broadcast_client";
 
-    // нормализуем роль (на случай "system" -> считаем админом)
-    const userRole = userRoleRaw === "system" ? "admin" : userRoleRaw;
+    const userRole = userRoleRaw === "system" ? "admin" : userRoleRaw; // на всякий случай
 
     if (isBroadcast) {
+      // для broadcast разрешаем обновлять только adminLastReadAt (и то если реально админ)
       if (userRole === "admin") {
         await chat.update({ adminLastReadAt: now });
       }
-      // driver/client в broadcast не обновляем
     } else {
       if (userRole === "driver") {
         await chat.update({ driverLastReadAt: now });
@@ -281,16 +290,11 @@ export const getChatMessages = async (req, res) => {
       }
     }
 
+    // canReply (RN)
     const canReply =
-      chat.status !== "closed" &&
-      ![
-        "broadcast_driver",
-        "broadcast_client",
-        "system_driver",
-        "system_client",
-      ].includes(chat.type);
+      chat.status !== "closed" && !READ_ONLY_TYPES.has(chat.type);
 
-    // Берем свежие данные чата после обновления read-state
+    // Возвращаем актуальные lastReadAt
     const freshChat = await Chat.findByPk(chatId);
 
     return res.json({
@@ -306,7 +310,7 @@ export const getChatMessages = async (req, res) => {
       },
     });
   } catch (e) {
-    console.error("❌ Error in getChatMessages:", e);
+    console.error(e);
     res.status(500).json({ message: "Error fetching messages" });
   }
 };
