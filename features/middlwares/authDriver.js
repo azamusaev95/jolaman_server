@@ -20,9 +20,14 @@ export const authDriver = (req, res, next) => {
       return res.status(401).json({ message: "Неверный или истёкший токен" });
     }
 
+    if (!payload?.id) {
+      return res.status(401).json({ message: "Invalid token payload" });
+    }
+
+    // ✅ Жёстко фиксируем роль, так как этот middleware используется только для драйверских роутов
     req.user = {
       id: payload.id,
-      role: payload.role,
+      role: "driver",
     };
 
     return next();
