@@ -11,6 +11,7 @@ import {
   createSystemChat,
 } from "./chat.controller.js";
 import { authDriver } from "../middlwares/authDriver.js";
+import { authMiddleware } from "../../middlewares/auth.middleware.js";
 
 const router = Router();
 
@@ -22,7 +23,7 @@ router.post("/:chatId/messages", sendMessage);
 
 router.get("/driver/:chatId/messages", authDriver, getChatMessages);
 
-router.get("/admin/:chatId/messages", getChatMessages);
+router.get("/admin/:chatId/messages", authMiddleware, getChatMessages);
 
 // LISTS
 router.get("/", getAllChats);
