@@ -1,15 +1,19 @@
+// server.js
+
 import "dotenv/config";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import sequelize from "./config/db.js";
 import app from "./app.js";
 import { setupLogger } from "./utils/logger.js";
-import { registerSocketHandlers } from "./socket/socketHandlers.js";
+
+import { registerChatSockets } from "./socket/chat.socket.js";
+import { registerDebugSockets } from "./socket/debug.socket.js";
 
 const PORT = process.env.PORT || 8787;
 const httpServer = createServer(app);
 
-// Инициализация Socket.io
+// --- Socket.io (один io, два namespace: /chat и /debug) ---
 const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ["websocket", "polling"],
@@ -17,23 +21,27 @@ const io = new Server(httpServer, {
   pingInterval: 25000,
 });
 
-// ПЕРЕНЕСЕНО: Делаем io доступным в контроллерах через req.app.get('io')
+// io доступен в контроллерах
 app.set("io", io);
 
-// ИЗМЕНЕНО: Инициализируем логгер и получаем оригинальную консоль
+// логгер (получаем оригинальную консоль)
 const originalConsole = setupLogger(io);
 
-// ИЗМЕНЕНО: Регистрируем обработчики сокетов
-registerSocketHandlers(io, originalConsole);
+// ✅ чат: /chat
+registerChatSockets(io, originalConsole);
+
+// ✅ debug: /debug (network + console)
+registerDebugSockets(io, originalConsole);
 
 async function start() {
   try {
     await sequelize.authenticate();
-    // ИЗМЕНЕНО: Используем оригинальную консоль здесь, так как логгер уже может перехватывать
     originalConsole.log("✅ DB connection OK");
 
     httpServer.listen(PORT, "0.0.0.0", () => {
       originalConsole.log(`🚀 Shumkar Server running on port ${PORT}`);
+      originalConsole.log(`💬 Chat namespace: /chat`);
+      originalConsole.log(`🐞 Debug namespace: /debug`);
     });
   } catch (err) {
     originalConsole.error("❌ DB init error:", err);
