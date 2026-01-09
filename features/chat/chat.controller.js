@@ -16,37 +16,21 @@ const READ_ONLY_TYPES = new Set([
 // SOCKET HELPERS
 // ======================================================
 
-/**
- * Отправляет сообщение:
- * - в комнату конкретного чата (chatId)
- * - в глобальный канал админов
- */
 const emitSocketMessage = (req, chatId, message) => {
   try {
     const io = req.app.get("io");
-    if (!io) {
-      console.error("❌ [SOCKET ERROR] IO not found");
-      return;
-    }
+    if (!io) return;
 
     const roomName = String(chatId);
-
     io.to(roomName).emit("new_message", message);
     io.to("admins").emit("new_message", message);
 
-    console.log(`📡 [SOCKET] Broadcasted to room '${roomName}' AND 'admins'`);
+    console.log(`📡 [SOCKET] New message in chat ${chatId}`);
   } catch (err) {
     console.error("❌ [SOCKET ERROR]", err);
   }
 };
 
-/**
- * Пуш для рассылок/системных:
- * - broadcast_driver -> room "drivers"
- * - broadcast_client -> room "clients"
- * - system_driver -> room `driver:<id>`
- * - system_client -> room `client:<id>`
- */
 const emitAudiencePush = (req, chat, message) => {
   try {
     const io = req.app.get("io");
@@ -62,7 +46,7 @@ const emitAudiencePush = (req, chat, message) => {
       io.to(`client:${chat.clientId}`).emit("new_message", message);
     }
   } catch (e) {
-    console.error("❌ [SOCKET AUDIENCE PUSH ERROR]", e);
+    console.error("❌ [SOCKET PUSH ERROR]", e);
   }
 };
 
@@ -70,70 +54,44 @@ const emitAudiencePush = (req, chat, message) => {
 // READ-STATE HELPERS
 // ======================================================
 
-/**
- * Определяем роль действующего лица (кто открыл чат / кто отправил сообщение):
- * - если есть senderRole (в body) — используем его
- * - иначе сравниваем req.user.id с chat.driverId/chat.clientId
- * - иначе считаем admin
- *
- * Возвращает: "driver" | "client" | "admin"
- */
+// Помощник для определения роли
 const resolveActorRole = (req, chat, senderRole) => {
-  const roleFromBody = typeof senderRole === "string" ? senderRole : null;
-
   if (
-    roleFromBody &&
-    ["driver", "client", "admin", "system"].includes(roleFromBody)
+    senderRole &&
+    ["driver", "client", "admin", "system"].includes(senderRole)
   ) {
-    return roleFromBody === "system" ? "admin" : roleFromBody;
+    return senderRole === "system" ? "admin" : senderRole;
   }
-
   const userId = req.user?.id;
-  if (userId && chat?.driverId && String(chat.driverId) === String(userId))
-    return "driver";
-  if (userId && chat?.clientId && String(chat.clientId) === String(userId))
-    return "client";
-
+  if (userId && chat?.driverId === userId) return "driver";
+  if (userId && chat?.clientId === userId) return "client";
   return "admin";
 };
 
-/**
- * Обновляем lastReadAt по роли.
- * ВАЖНО: для broadcast_* нельзя ставить driver/client lastReadAt (иначе "прочитал один = прочитали все").
- * Для broadcast разрешаем обновлять только adminLastReadAt.
- */
-const touchChatReadAt = async (chat, actorRole) => {
-  if (!chat) return;
-
+// Помощник для подготовки объекта обновления даты прочтения
+const getReadAtUpdateObject = (chat, actorRole) => {
+  if (!chat) return {};
   const now = new Date();
   const isBroadcast =
     chat.type === "broadcast_driver" || chat.type === "broadcast_client";
 
   if (isBroadcast) {
-    if (actorRole === "admin") {
-      await chat.update({ adminLastReadAt: now });
-    }
-    return;
+    return actorRole === "admin" ? { adminLastReadAt: now } : {};
   }
 
-  if (actorRole === "driver") {
-    await chat.update({ driverLastReadAt: now });
-  } else if (actorRole === "client") {
-    await chat.update({ clientLastReadAt: now });
-  } else {
-    await chat.update({ adminLastReadAt: now });
-  }
+  if (actorRole === "driver") return { driverLastReadAt: now };
+  if (actorRole === "client") return { clientLastReadAt: now };
+  return { adminLastReadAt: now };
 };
 
 // ======================================================
-// ORDER CHAT
+// CONTROLLERS
 // ======================================================
 
 // @map: getOrCreateOrderChat
 export const getOrCreateOrderChat = async (req, res) => {
   try {
     const { orderId, clientId, driverId } = req.body;
-
     if (!orderId || !clientId || !driverId) {
       return res.status(400).json({ message: "Неполные данные" });
     }
@@ -155,7 +113,6 @@ export const getOrCreateOrderChat = async (req, res) => {
         driverId,
         status: "active",
       });
-
       chat = await Chat.findByPk(newChat.id, {
         include: [
           { model: Client, as: "client" },
@@ -164,17 +121,11 @@ export const getOrCreateOrderChat = async (req, res) => {
         ],
       });
     }
-
     return res.json(chat);
   } catch (e) {
-    console.error(e);
     res.status(500).json({ message: "Error" });
   }
 };
-
-// ======================================================
-// SEND MESSAGE (обычные чаты)
-// ======================================================
 
 // @map: sendMessage
 export const sendMessage = async (req, res) => {
@@ -182,21 +133,11 @@ export const sendMessage = async (req, res) => {
     const { chatId } = req.params;
     const { senderId, senderRole, content, contentType = "text" } = req.body;
 
-    if (!chatId) return res.status(400).json({ message: "No chatId" });
-    if (!content) return res.status(400).json({ message: "No content" });
-
     const chat = await Chat.findByPk(chatId);
     if (!chat) return res.status(404).json({ message: "Chat not found" });
 
-    // ✅ Запрет на ответы в broadcast/system_* на уровне API
-    if (READ_ONLY_TYPES.has(chat.type)) {
-      return res
-        .status(403)
-        .json({ message: "Replies are not allowed in this chat" });
-    }
-
-    if (chat.status === "closed") {
-      return res.status(403).json({ message: "Chat closed" });
+    if (READ_ONLY_TYPES.has(chat.type) || chat.status === "closed") {
+      return res.status(403).json({ message: "Action not allowed" });
     }
 
     const message = await ChatMessage.create({
@@ -207,35 +148,25 @@ export const sendMessage = async (req, res) => {
       contentType,
     });
 
-    // Поднимаем чат в списках
-    await Chat.update({ updatedAt: new Date() }, { where: { id: chatId } });
-
-    // ✅ Отправитель сам "видел" чат
+    // ИЗМЕНЕНО: Обновляем статус прочтения отправителя и время чата за один раз
     const actorRole = resolveActorRole(req, chat, senderRole);
-    await touchChatReadAt(chat, actorRole);
+    const readUpdate = getReadAtUpdateObject(chat, actorRole);
 
-    // 🔥 сокеты
+    await chat.update({ ...readUpdate, updatedAt: new Date() });
+
     emitSocketMessage(req, chatId, message);
-
     return res.json(message);
   } catch (e) {
-    console.error(e);
     res.status(500).json({ message: "Send error" });
   }
 };
 
-// ======================================================
-// GET MESSAGES
-// ======================================================
-
+// @map: getChatMessages
 export const getChatMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
     const { page = 1, limit = 50 } = req.query;
-    const userId = req.user?.id; // ID текущего пользователя из токена
-
-    const numericLimit = Number(limit) || 50;
-    const offset = (Number(page) - 1) * numericLimit;
+    const userId = req.user?.id;
 
     const chat = await Chat.findByPk(chatId);
     if (!chat) return res.status(404).json({ message: "Chat not found" });
@@ -243,11 +174,11 @@ export const getChatMessages = async (req, res) => {
     const messages = await ChatMessage.findAndCountAll({
       where: { chatId },
       order: [["createdAt", "ASC"]],
-      limit: numericLimit,
-      offset,
+      limit: Number(limit) || 50,
+      offset: (Number(page) - 1) * (Number(limit) || 50),
     });
 
-    // Помечаем все сообщения в чате как прочитанные (isRead = true)
+    // Помечаем сообщения прочитанными
     if (userId) {
       await ChatMessage.update(
         { isRead: true },
@@ -255,53 +186,175 @@ export const getChatMessages = async (req, res) => {
       );
     }
 
-    // ✅ ИЗМЕНЕНО: Прямое обновление статуса прочтения для ВОДИТЕЛЯ
-    // Больше не используем resolveActorRole. Проверяем напрямую:
-    if (userId && chat.driverId && String(chat.driverId) === String(userId)) {
-      // ИЗМЕНЕНО: Обновляем driverLastReadAt и updatedAt ОДНИМ запросом, чтобы время совпало
-      await chat.update({
-        driverLastReadAt: new Date(),
-        updatedAt: new Date(),
-      });
-      console.log(
-        `✅ [READ_STATUS] driverLastReadAt updated for chat ${chatId}`
-      );
+    // ✅ ИЗМЕНЕНО: Прямое обновление driverLastReadAt без resolveActorRole для скорости
+    const updatePayload = { updatedAt: new Date() };
+
+    if (userId && chat.driverId === userId) {
+      updatePayload.driverLastReadAt = new Date();
+      console.log(`✅ [READ] Driver ${userId} read chat ${chatId}`);
+    } else {
+      // Логика для других ролей
+      const actorRole = resolveActorRole(req, chat, null);
+      const readData = getReadAtUpdateObject(chat, actorRole);
+      Object.assign(updatePayload, readData);
     }
 
-    const canReply =
-      chat.status !== "closed" &&
-      ![
-        "broadcast_driver",
-        "broadcast_client",
-        "system_driver",
-        "system_client",
-      ].includes(chat.type);
+    // ИЗМЕНЕНО: Атомарное обновление даты прочтения и даты обновления чата
+    await chat.update(updatePayload);
 
-    // Берем свежие данные чата после обновления
     const freshChat = await Chat.findByPk(chatId);
+    const canReply =
+      chat.status !== "closed" && !READ_ONLY_TYPES.has(chat.type);
 
     return res.json({
-      chat: {
-        ...freshChat.toJSON(),
-        canReply,
-      },
+      chat: { ...freshChat.toJSON(), canReply },
       items: messages.rows,
       pagination: {
         total: messages.count,
         page: Number(page),
-        limit: numericLimit,
+        limit: Number(limit) || 50,
       },
     });
   } catch (e) {
-    console.error("❌ Error in getChatMessages:", e);
-    res.status(500).json({ message: "Error fetching messages" });
+    res.status(500).json({ message: "Error" });
   }
 };
-// ======================================================
-// LIST CHATS (admin)
-// ======================================================
 
-// @map: getAllChats
+// @map: getDriverChats
+export const getDriverChats = async (req, res) => {
+  try {
+    const driverId = req.user?.id;
+    if (!driverId) return res.status(401).json({ message: "Unauthorized" });
+
+    const chats = await Chat.findAll({
+      where: {
+        [Op.or]: [
+          { driverId },
+          { type: "broadcast_driver" },
+          { type: "system_driver", driverId },
+        ],
+      },
+      include: [
+        {
+          model: ChatMessage,
+          as: "messages",
+          limit: 1,
+          order: [["createdAt", "DESC"]],
+        },
+        { model: Client, as: "client" },
+        { model: Driver, as: "driver" },
+        { model: Order, as: "order" },
+      ],
+      order: [["updatedAt", "DESC"]],
+    });
+
+    return res.json(chats);
+  } catch (e) {
+    res.status(500).json({ message: "Error" });
+  }
+};
+
+// @map: createSupportChatWithDriver
+export const createSupportChatWithDriver = async (req, res) => {
+  try {
+    const { driverId, adminId, content, senderRole, senderId } = req.body;
+    let chat = await Chat.findOne({
+      where: { type: "support_driver", driverId, status: "active" },
+    });
+
+    if (!chat) {
+      chat = await Chat.create({
+        type: "support_driver",
+        driverId,
+        adminId: adminId || null,
+        status: "active",
+        title: "Поддержка",
+      });
+    }
+
+    const message = await ChatMessage.create({
+      chatId: chat.id,
+      senderId,
+      senderRole,
+      content,
+      contentType: "text",
+    });
+
+    // ИЗМЕНЕНО: Атомарное обновление при создании сообщения в поддержке
+    const actorRole = resolveActorRole(req, chat, senderRole);
+    const readUpdate = getReadAtUpdateObject(chat, actorRole);
+    await chat.update({ ...readUpdate, updatedAt: new Date() });
+
+    emitSocketMessage(req, chat.id, message);
+    return res.status(201).json({ chat, message });
+  } catch (e) {
+    res.status(500).json({ message: "Error" });
+  }
+};
+
+// @map: createBroadcastChat
+export const createBroadcastChat = async (req, res) => {
+  try {
+    const { target, title, content, senderId, senderRole } = req.body;
+    const type = target === "driver" ? "broadcast_driver" : "broadcast_client";
+
+    const chat = await Chat.create({
+      type,
+      status: "active",
+      title: title || null,
+      adminLastReadAt: new Date(),
+    });
+    const message = await ChatMessage.create({
+      chatId: chat.id,
+      senderId,
+      senderRole: senderRole || "admin",
+      content,
+    });
+
+    await chat.update({ updatedAt: new Date() });
+    emitSocketMessage(req, chat.id, message);
+    emitAudiencePush(req, chat, message);
+
+    return res.status(201).json({ chat, message });
+  } catch (e) {
+    res.status(500).json({ message: "Error" });
+  }
+};
+
+// @map: createSystemChat
+export const createSystemChat = async (req, res) => {
+  try {
+    const { target, driverId, clientId, title, content, senderId, senderRole } =
+      req.body;
+    const type = target === "driver" ? "system_driver" : "system_client";
+
+    const chat = await Chat.create({
+      type,
+      status: "active",
+      title: title || "Система",
+      driverId: target === "driver" ? driverId : null,
+      clientId: target === "client" ? clientId : null,
+      adminLastReadAt: new Date(),
+    });
+
+    const message = await ChatMessage.create({
+      chatId: chat.id,
+      senderId,
+      senderRole: senderRole || "system",
+      content,
+    });
+
+    await chat.update({ updatedAt: new Date() });
+    emitSocketMessage(req, chat.id, message);
+    emitAudiencePush(req, chat, message);
+
+    return res.status(201).json({ chat, message });
+  } catch (e) {
+    res.status(500).json({ message: "Error" });
+  }
+};
+
+// @map: getAllChats (Admin List)
 export const getAllChats = async (req, res) => {
   try {
     const { orderId, status, type } = req.query;
@@ -329,235 +382,8 @@ export const getAllChats = async (req, res) => {
       ],
       order: [["updatedAt", "DESC"]],
     });
-
     return res.json(chats);
   } catch (e) {
-    res.status(500).json({ message: "Error" });
-  }
-};
-
-// ======================================================
-// LIST CHATS (driver app)
-// ======================================================
-
-export const getDriverChats = async (req, res) => {
-  try {
-    const driverId = req.user?.id;
-
-    console.log("DEBUG: Fetching ALL chats for driverId:", driverId);
-
-    if (!driverId) {
-      return res
-        .status(401)
-        .json({ message: `polzovatel ne avtorizovan ${driverId}` });
-    }
-
-    const where = {
-      [Op.or]: [
-        { driverId },
-        { type: "broadcast_driver" },
-        { type: "system_driver", driverId },
-      ],
-    };
-
-    console.log(
-      "DEBUG: Final WHERE clause (no status filter):",
-      JSON.stringify(where, null, 2)
-    );
-
-    const chats = await Chat.findAll({
-      where,
-      include: [
-        {
-          model: ChatMessage,
-          as: "messages",
-          limit: 1,
-          order: [["createdAt", "DESC"]],
-        },
-        { model: Client, as: "client" },
-        { model: Driver, as: "driver" },
-        { model: Order, as: "order" },
-      ],
-      order: [["updatedAt", "DESC"]],
-    });
-
-    console.log(`DEBUG: Found ${chats.length} chats total`);
-
-    return res.json(chats);
-  } catch (e) {
-    console.error("ERROR in getDriverChats:", e);
-    res.status(500).json({
-      message: "Ошибка при получении всех чатов",
-      error: e.message,
-    });
-  }
-};
-
-// ======================================================
-// SUPPORT DRIVER
-// ======================================================
-
-// @map: createSupportChatWithDriver
-export const createSupportChatWithDriver = async (req, res) => {
-  try {
-    const { driverId, adminId, content, senderRole, senderId } = req.body;
-
-    let chat = await Chat.findOne({
-      where: { type: "support_driver", driverId, status: "active" },
-    });
-
-    if (!chat) {
-      chat = await Chat.create({
-        type: "support_driver",
-        driverId,
-        adminId: adminId || null,
-        status: "active",
-        title: "Поддержка",
-      });
-    }
-
-    const message = await ChatMessage.create({
-      chatId: chat.id,
-      senderId,
-      senderRole,
-      content,
-      contentType: "text",
-    });
-
-    await chat.update({ updatedAt: new Date() });
-
-    // ✅ Отправитель сам "видел" чат
-    const actorRole = resolveActorRole(req, chat, senderRole);
-    await touchChatReadAt(chat, actorRole);
-
-    emitSocketMessage(req, chat.id, message);
-
-    return res.status(201).json({ chat, message });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ message: "Error" });
-  }
-};
-
-// ======================================================
-// NEW: BROADCAST (отдельный чат на каждую рассылку)
-// ======================================================
-
-// @map: createBroadcastChat
-export const createBroadcastChat = async (req, res) => {
-  try {
-    const {
-      target, // "driver" | "client"
-      title,
-      content,
-      adminId,
-      senderId,
-      senderRole,
-      contentType = "text",
-    } = req.body;
-
-    if (!target || !["driver", "client"].includes(target)) {
-      return res.status(400).json({ message: "target must be driver|client" });
-    }
-    if (!content) return res.status(400).json({ message: "No content" });
-
-    const type = target === "driver" ? "broadcast_driver" : "broadcast_client";
-
-    const chat = await Chat.create({
-      type,
-      status: "active",
-      title: title || null,
-      adminId: adminId || senderId || null,
-      // Автор (админ) не должен видеть своё как "непрочитано"
-      adminLastReadAt: new Date(),
-    });
-
-    const message = await ChatMessage.create({
-      chatId: chat.id,
-      senderId: senderId || adminId || null,
-      senderRole: senderRole || "admin",
-      content,
-      contentType,
-    });
-
-    await chat.update({ updatedAt: new Date() });
-
-    // 1) в комнату чата (если кто-то открыл этот чат)
-    emitSocketMessage(req, chat.id, message);
-
-    // 2) всем по аудитории (drivers/clients) + админам
-    emitAudiencePush(req, chat, message);
-
-    return res.status(201).json({ chat, message });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ message: "Error" });
-  }
-};
-
-// ======================================================
-// NEW: SYSTEM (отдельный чат на каждого получателя)
-// ======================================================
-
-// @map: createSystemChat
-export const createSystemChat = async (req, res) => {
-  try {
-    const {
-      target, // "driver" | "client"
-      driverId,
-      clientId,
-      title,
-      content,
-      adminId,
-      senderId,
-      senderRole,
-      contentType = "text",
-    } = req.body;
-
-    if (!target || !["driver", "client"].includes(target)) {
-      return res.status(400).json({ message: "target must be driver|client" });
-    }
-    if (!content) return res.status(400).json({ message: "No content" });
-
-    if (target === "driver" && !driverId) {
-      return res.status(400).json({ message: "driverId required" });
-    }
-    if (target === "client" && !clientId) {
-      return res.status(400).json({ message: "clientId required" });
-    }
-
-    const type = target === "driver" ? "system_driver" : "system_client";
-
-    const chat = await Chat.create({
-      type,
-      status: "active",
-      title: title || "Система",
-      driverId: target === "driver" ? driverId : null,
-      clientId: target === "client" ? clientId : null,
-      adminId: adminId || senderId || null,
-      // Автор (админ/система) не должен видеть своё как "непрочитано"
-      adminLastReadAt: new Date(),
-    });
-
-    const message = await ChatMessage.create({
-      chatId: chat.id,
-      senderId: senderId || adminId || null,
-      senderRole: senderRole || "system",
-      content,
-      contentType,
-    });
-
-    await chat.update({ updatedAt: new Date() });
-
-    // 1) в комнату чата (если кто-то открыл именно этот system чат)
-    emitSocketMessage(req, chat.id, message);
-
-    // 2) личная доставка (driver:<id> / client:<id>)
-    emitAudiencePush(req, chat, message);
-
-    return res.status(201).json({ chat, message });
-  } catch (e) {
-    console.error(e);
     res.status(500).json({ message: "Error" });
   }
 };
