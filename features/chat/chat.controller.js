@@ -228,12 +228,11 @@ export const sendMessage = async (req, res) => {
 // GET MESSAGES
 // ======================================================
 
-// @map: getChatMessages
 export const getChatMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
     const { page = 1, limit = 50 } = req.query;
-    const userId = req.user?.id;
+    const userId = req.user?.id; // ID текущего пользователя из токена
 
     const numericLimit = Number(limit) || 50;
     const offset = (Number(page) - 1) * numericLimit;
@@ -248,7 +247,7 @@ export const getChatMessages = async (req, res) => {
       offset,
     });
 
-    // Старое поведение: помечаем сообщения прочитанными (per-message)
+    // Помечаем все сообщения в чате как прочитанные (isRead = true)
     if (userId) {
       await ChatMessage.update(
         { isRead: true },
@@ -256,15 +255,29 @@ export const getChatMessages = async (req, res) => {
       );
     }
 
-    // ✅ Новое: фиксируем read-state на уровне чата (для отображения в списках)
-    const actorRole = resolveActorRole(req, chat, null);
-    await touchChatReadAt(chat, actorRole);
+    // ✅ ИЗМЕНЕНО: Прямое обновление статуса прочтения для ВОДИТЕЛЯ
+    // Больше не используем resolveActorRole. Проверяем напрямую:
+    if (userId && chat.driverId && String(chat.driverId) === String(userId)) {
+      // ИЗМЕНЕНО: Обновляем driverLastReadAt и updatedAt ОДНИМ запросом, чтобы время совпало
+      await chat.update({
+        driverLastReadAt: new Date(),
+        updatedAt: new Date(),
+      });
+      console.log(
+        `✅ [READ_STATUS] driverLastReadAt updated for chat ${chatId}`
+      );
+    }
 
-    // canReply (RN)
     const canReply =
-      chat.status !== "closed" && !READ_ONLY_TYPES.has(chat.type);
+      chat.status !== "closed" &&
+      ![
+        "broadcast_driver",
+        "broadcast_client",
+        "system_driver",
+        "system_client",
+      ].includes(chat.type);
 
-    // Возвращаем актуальные lastReadAt
+    // Берем свежие данные чата после обновления
     const freshChat = await Chat.findByPk(chatId);
 
     return res.json({
@@ -280,11 +293,10 @@ export const getChatMessages = async (req, res) => {
       },
     });
   } catch (e) {
-    console.error(e);
+    console.error("❌ Error in getChatMessages:", e);
     res.status(500).json({ message: "Error fetching messages" });
   }
 };
-
 // ======================================================
 // LIST CHATS (admin)
 // ======================================================
@@ -332,12 +344,8 @@ export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
 
-    console.log("DEBUG: Fetching ALL chats for driverId:", driverId);
-
     if (!driverId) {
-      return res
-        .status(401)
-        .json({ message: `polzovatel ne avtorizovan ${driverId}` });
+      return res.status(401).json({ message: "Пользователь не авторизован" });
     }
 
     const where = {
@@ -347,11 +355,6 @@ export const getDriverChats = async (req, res) => {
         { type: "system_driver", driverId },
       ],
     };
-
-    console.log(
-      "DEBUG: Final WHERE clause (no status filter):",
-      JSON.stringify(where, null, 2)
-    );
 
     const chats = await Chat.findAll({
       where,
@@ -366,14 +369,13 @@ export const getDriverChats = async (req, res) => {
         { model: Driver, as: "driver" },
         { model: Order, as: "order" },
       ],
+      // Сортируем так, чтобы последние обновленные были сверху
       order: [["updatedAt", "DESC"]],
     });
 
-    console.log(`DEBUG: Found ${chats.length} chats total`);
-
     return res.json(chats);
   } catch (e) {
-    console.error("ERROR in getDriverChats:", e);
+    console.error("❌ ERROR in getDriverChats:", e);
     res.status(500).json({
       message: "Ошибка при получении всех чатов",
       error: e.message,

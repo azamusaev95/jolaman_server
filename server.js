@@ -36,6 +36,10 @@ registerDebugSockets(io, originalConsole);
 async function start() {
   try {
     await sequelize.authenticate();
+    // originalConsole.log("🛠 DB: sync(alter) started...");
+    // await sequelize.sync({ alter: true });
+    // originalConsole.log("✅ DB: sync(alter) finished successfully");
+
     originalConsole.log("✅ DB connection OK");
 
     httpServer.listen(PORT, "0.0.0.0", () => {
