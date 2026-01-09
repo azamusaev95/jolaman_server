@@ -34,19 +34,19 @@ export const getAllChatsForAdmin = async (req, res) => {
         {
           model: ChatMessage,
           as: "messages",
-          separate: true, 
+          separate: true,
           limit: 1,
           order: [["createdAt", "DESC"]],
         },
-        { 
-          model: Client, 
-          as: "client", 
-          attributes: ["id", "name", "phone"] // ИЗМЕНЕНО: firstName -> name
+        {
+          model: Client,
+          as: "client",
+          attributes: ["id", "name", "phone"], // ИЗМЕНЕНО: firstName -> name
         },
         {
           model: Driver,
           as: "driver",
-          attributes: ["id", "firstName", "lastName", "phone", "callsign"],
+          attributes: ["id", "firstName", "lastName", "phone"],
         },
         {
           model: Order,
@@ -58,7 +58,7 @@ export const getAllChatsForAdmin = async (req, res) => {
 
     // 3. Формируем чистый массив объектов (items)
     // УДАЛЕНО: Маппинг с проверкой unread сообщений
-    const items = chats.map(chat => chat.toJSON());
+    const items = chats.map((chat) => chat.toJSON());
 
     // 4. Возврат данных в запрошенном формате
     return res.status(200).json({
