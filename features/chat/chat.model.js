@@ -101,18 +101,7 @@ const Chat = sequelize.define(
       allowNull: true,
     },
 
-    /**
-     * ======================================================
-     * READ STATE
-     * ======================================================
-     * Храним "когда последний раз читали" для каждой роли.
-     * Это корректно для чатов 1-на-1 (order/support/system).
-     *
-     * ВАЖНО: Для broadcast_* (один чат на сотни пользователей) эти поля НЕ решают задачу
-     * "кто из водителей/клиентов прочитал" — там нужен отдельный механизм (например,
-     * хранить seen у Driver/Client или отдельную таблицу read-status).
-     */
-    driverLastReadAt: {
+     driverLastReadAt: {
       type: DataTypes.DATE,
       field: "driver_last_read_at",
       allowNull: true,

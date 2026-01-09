@@ -329,11 +329,7 @@ export const getChatMessages = async (req, res) => {
   }
 };
 
-// ======================================================
-// LIST CHATS (admin)
-// ======================================================
 
-// @map: getAllChats
 export const getAllChats = async (req, res) => {
   try {
     const { orderId, status, type, page = 1, limit = 10 } = req.query;
@@ -472,9 +468,7 @@ export const getAllChats = async (req, res) => {
   }
 };
 
-// ======================================================
-// LIST CHATS (driver app)
-// ======================================================
+
 
 export const getDriverChats = async (req, res) => {
   try {
@@ -565,9 +559,6 @@ export const getDriverChats = async (req, res) => {
   }
 };
 
-// ======================================================
-// SUPPORT DRIVER
-// ======================================================
 
 // @map: createSupportChatWithDriver
 export const createSupportChatWithDriver = async (req, res) => {

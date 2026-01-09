@@ -1,38 +1,19 @@
 import { Router } from "express";
-
 import {
-  getOrCreateOrderChat,
-  sendMessage,
-  getChatMessages,
-  getAllChats,
-  getDriverChats,
-  createSupportChatWithDriver,
-  createBroadcastChat,
-  createSystemChat,
-} from "./chat.controller.js";
-import { authDriver } from "../middlwares/authDriver.js";
+  getAllChatsForAdmin, // ИЗМЕНЕНО: Получение всех чатов с фильтрами
+  getMessagesByChatId, // ИЗМЕНЕНО: Получение сообщений + обновление adminLastReadAt
+  sendMessage, // ИЗМЕНЕНО: Отправка только в support_* чаты
+  createBroadcastChat, // ИЗМЕНЕНО: Атомарное создание (чат + сообщение)
+  createSystemChat, // ИЗМЕНЕНО: Атомарное создание (чат + сообщение)
+} from "./chatAdmin.controller.js";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
 
 const router = Router();
+router.use(authMiddleware);
 
-// ORDER
-router.post("/order-chat", getOrCreateOrderChat);
-
-// MESSAGES
+router.get("/all", getAllChatsForAdmin);
+router.get("/:chatId/messages", getMessagesByChatId);
 router.post("/:chatId/messages", sendMessage);
-
-router.get("/driver/:chatId/messages", authDriver, getChatMessages);
-
-router.get("/admin/:chatId/messages", authMiddleware, getChatMessages);
-
-// LISTS
-router.get("/", getAllChats);
-router.get("/driver", authDriver, getDriverChats);
-
-// SUPPORT
-router.post("/support/driver", createSupportChatWithDriver);
-
-// NEW: BROADCAST + SYSTEM
 router.post("/broadcast", createBroadcastChat);
 router.post("/system", createSystemChat);
 
