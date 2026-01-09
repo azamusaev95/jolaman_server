@@ -260,7 +260,9 @@ export const getDriverChats = async (req, res) => {
     console.log("DEBUG: Fetching ALL chats for driverId:", driverId);
 
     if (!driverId) {
-      return res.status(401).json({ message: "Пользователь не авторизован" });
+      return res
+        .status(401)
+        .json({ message: "Пользователь не авторизован", driverId });
     }
 
     // ИЗМЕНЕНО: Теперь в where только условия по принадлежности чата, без статусов
