@@ -337,7 +337,7 @@ export const getDriverChats = async (req, res) => {
     if (!driverId) {
       return res
         .status(401)
-        .json({ message: "Пользователь не авторизован", driverId });
+        .json({ message: `polzovatel ne avtorizovan ${driverId}` });
     }
 
     const where = {
