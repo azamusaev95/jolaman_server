@@ -10,35 +10,38 @@ import { Op } from "sequelize";
  */
 export const getAllChatsForAdmin = async (req, res) => {
   try {
-    // ИЗМЕНЕНО: Удалил orderId из параметров запроса
     const { type, status, page = 1, limit = 15 } = req.query;
 
-    const take = parseInt(limit);
-    const skip = (parseInt(page) - 1) * take;
+    const numericLimit = parseInt(limit) || 15;
+    const numericPage = parseInt(page) || 1;
+    const offset = (numericPage - 1) * numericLimit;
 
     const whereCondition = {};
+    if (type) whereCondition.type = type;
+    if (status) whereCondition.status = status;
 
-    // УДАЛЕНО: Фильтрация по orderId больше не производится
+    // 1. Получаем общее количество записей
+    const total = await Chat.count({ where: whereCondition });
 
-    if (type) {
-      whereCondition.type = type;
-    }
-
-    if (status) {
-      whereCondition.status = status;
-    }
-
-    const { count, rows: chats } = await Chat.findAndCountAll({
+    // 2. Основной запрос к БД
+    const chats = await Chat.findAll({
       where: whereCondition,
-      limit: take,
-      offset: skip,
-      // Сортировка: самые свежие изменения в чатах (новые сообщения) выше всего
+      limit: numericLimit,
+      offset: offset,
+      // УДАЛЕНО: Лишние вычисления unread, только сортировка по обновлению
       order: [["updatedAt", "DESC"]],
       include: [
         {
+          model: ChatMessage,
+          as: "messages",
+          separate: true,
+          limit: 1,
+          order: [["createdAt", "DESC"]],
+        },
+        {
           model: Client,
           as: "client",
-          attributes: ["id", "firstName", "lastName", "phone"],
+          attributes: ["id", "name", "phone"], // ИЗМЕНЕНО: firstName -> name
         },
         {
           model: Driver,
@@ -48,27 +51,31 @@ export const getAllChatsForAdmin = async (req, res) => {
         {
           model: Order,
           as: "order",
-          attributes: ["id", "status", "number"],
+          attributes: ["id", "status", "publicNumber"], // ИЗМЕНЕНО: number -> publicNumber
         },
       ],
     });
 
+    // 3. Формируем чистый массив объектов (items)
+    // УДАЛЕНО: Маппинг с проверкой unread сообщений
+    const items = chats.map((chat) => chat.toJSON());
+
+    // 4. Возврат данных в запрошенном формате
     return res.status(200).json({
-      success: true,
-      data: chats,
-      meta: {
-        totalItems: count,
-        totalPages: Math.ceil(count / take),
-        currentPage: parseInt(page),
-        limit: take,
+      items,
+      pagination: {
+        total,
+        page: numericPage,
+        limit: numericLimit,
+        hasMore: offset + items.length < total,
       },
     });
   } catch (error) {
-    // ИЗМЕНЕНО: Логируем конкретную ошибку для удобства отладки на сервере
+    // ДОБАВЛЕНО: Логирование для отладки
     console.error("ОШИБКА getAllChatsForAdmin:", error);
     return res.status(500).json({
       success: false,
-      message: "Ошибка сервера при получении общего списка чатов",
+      message: "Ошибка сервера при получении списка чатов",
       error: error.message,
     });
   }
