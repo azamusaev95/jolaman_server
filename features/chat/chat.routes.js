@@ -19,8 +19,10 @@ router.post("/order-chat", getOrCreateOrderChat);
 
 // MESSAGES
 router.post("/:chatId/messages", sendMessage);
-router.get("/admin/:chatId/messages", getChatMessages);
+
 router.get("/driver/:chatId/messages", authDriver, getChatMessages);
+
+router.get("/admin/:chatId/messages", getChatMessages);
 
 // LISTS
 router.get("/", getAllChats);
