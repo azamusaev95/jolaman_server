@@ -3,7 +3,7 @@ import ChatMessage from "../chatMessage/chatMessage.model.js";
 import Order from "../order/order.model.js";
 import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
-import { Op } from "sequelize";
+import Sequelize, { Op } from "sequelize";
 
 export const getAllChatsForAdmin = async (req, res) => {
   try {
