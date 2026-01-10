@@ -4,6 +4,7 @@ import Order from "../order/order.model.js";
 import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
 import Sequelize, { Op } from "sequelize";
+import sequelize from "../../config/db.js"; // ДОБАВЛЕНО: импорт sequelize для транзакций
 
 export const getAllChatsForAdmin = async (req, res) => {
   try {
@@ -17,15 +18,12 @@ export const getAllChatsForAdmin = async (req, res) => {
     if (type) whereCondition.type = type;
     if (status) whereCondition.status = status;
 
-    // 1. Получаем общее количество записей
     const total = await Chat.count({ where: whereCondition });
 
-    // 2. Основной запрос к БД
     const chats = await Chat.findAll({
       where: whereCondition,
       attributes: {
         include: [
-          // ДОБАВЛЕНО: Подзапрос для получения даты последнего сообщения НЕ от админа
           [
             Sequelize.literal(`(
               SELECT MAX(created_at)
@@ -46,7 +44,6 @@ export const getAllChatsForAdmin = async (req, res) => {
           as: "messages",
           separate: true,
           limit: 1,
-          // УДАЛЕНО: Фильтр по роли (теперь берем абсолютно последнее сообщение)
           order: [["createdAt", "DESC"]],
         },
         {
@@ -67,11 +64,9 @@ export const getAllChatsForAdmin = async (req, res) => {
       ],
     });
 
-    // 3. Формируем чистый массив объектов (items)
     const items = chats.map((chat) => {
       const chatJson = chat.toJSON();
 
-      // ДОБАВЛЕНО: Логика определения "непрочитанности" для админа
       const lastUserMsgAt = chatJson.lastNonAdminMessageAt
         ? new Date(chatJson.lastNonAdminMessageAt)
         : null;
@@ -79,18 +74,13 @@ export const getAllChatsForAdmin = async (req, res) => {
         ? new Date(chatJson.adminLastReadAt)
         : null;
 
-      // Если есть сообщение от юзера, и оно новее, чем админ читал, или админ вообще не читал
       chatJson.hasUnread = lastUserMsgAt
         ? !adminReadAt || lastUserMsgAt > adminReadAt
         : false;
 
-      // Удаляем техническое поле подзапроса из выдачи, если оно не нужно фронту
-      // delete chatJson.lastNonAdminMessageAt;
-
       return chatJson;
     });
 
-    // 4. Возврат данных в запрошенном формате
     return res.status(200).json({
       items,
       pagination: {
@@ -113,12 +103,11 @@ export const getAllChatsForAdmin = async (req, res) => {
 export const getMessagesByChatId = async (req, res) => {
   try {
     const { chatId } = req.params;
-    const { page = 1, limit = 50 } = req.query; // ДОБАВЛЕНО: пагинация для сообщений
+    const { page = 1, limit = 50 } = req.query;
 
     const take = parseInt(limit);
     const skip = (parseInt(page) - 1) * take;
 
-    // 1. Ищем чат, чтобы проверить его тип
     const chat = await Chat.findByPk(chatId);
 
     if (!chat) {
@@ -128,26 +117,17 @@ export const getMessagesByChatId = async (req, res) => {
       });
     }
 
-    // 2. ИЗМЕНЕНО: логика обновления adminLastReadAt
-    // Обновляем только если это чаты поддержки
     const supportTypes = ["support_client", "support_driver"];
 
     if (supportTypes.includes(chat.type)) {
-      // ИЗМЕНЕНО: фиксируем время прочтения админом
       chat.adminLastReadAt = new Date();
       await chat.save();
-
-      console.log(
-        `✅ Статус прочтения обновлен для чата: ${chatId} (Тип: ${chat.type})`
-      );
     }
 
-    // 3. ДОБАВЛЕНО: получение сообщений с пагинацией
     const { count, rows: messages } = await ChatMessage.findAndCountAll({
       where: { chatId },
       limit: take,
       offset: skip,
-      // ИЗМЕНЕНО: сортировка от старых к новым (хронология чата)
       order: [["createdAt", "ASC"]],
     });
 
@@ -161,7 +141,6 @@ export const getMessagesByChatId = async (req, res) => {
       },
     });
   } catch (error) {
-    // ДОБАВЛЕНО: детальный лог ошибки
     console.error("ОШИБКА getMessagesByChatId:", error);
     return res.status(500).json({
       success: false,
@@ -176,7 +155,6 @@ export const sendMessage = async (req, res) => {
     const { chatId } = req.params;
     const { senderId, senderRole, contentType, content } = req.body;
 
-    // 1. Ищем чат для проверки условий
     const chat = await Chat.findByPk(chatId);
 
     if (!chat) {
@@ -186,10 +164,8 @@ export const sendMessage = async (req, res) => {
       });
     }
 
-    // 2. ИЗМЕНЕНО: Ограничение типов чата для отправки сообщений
     const allowedTypes = ["support_client", "support_driver"];
 
-    // ДОБАВЛЕНО: Если тип чата не входит в список разрешенных, запрещаем отправку
     if (!allowedTypes.includes(chat.type)) {
       return res.status(403).json({
         success: false,
@@ -199,7 +175,6 @@ export const sendMessage = async (req, res) => {
       });
     }
 
-    // 3. ДОБАВЛЕНО: Создание сообщения в базе данных
     const newMessage = await ChatMessage.create({
       chatId,
       senderId,
@@ -209,28 +184,40 @@ export const sendMessage = async (req, res) => {
       isRead: false,
     });
 
-    // 4. ИЗМЕНЕНО: Обновление мета-данных чата (кто прочитал и когда обновлен)
     const now = new Date();
 
-    // Обновляем поле "последний раз открывал" для того, кто сейчас отправил сообщение
     if (senderRole === "admin") {
       chat.adminLastReadAt = now;
-    } else if (senderRole === "driver") {
-      chat.driverLastReadAt = now;
-    } else if (senderRole === "client") {
-      chat.clientLastReadAt = now;
     }
 
-    // ДОБАВЛЕНО: Принудительное обновление updatedAt, чтобы чат поднялся в списке всех чатов
     chat.changed("updatedAt", true);
     await chat.save();
+
+    // ИЗМЕНЕНО: Интеграция Socket.io
+    const io = req.app.get("io");
+    if (io) {
+      const chatNamespace = io.of("/chat");
+
+      // 1. Отправляем сообщение всем в комнате chatId
+      chatNamespace.to(String(chatId)).emit("new_message", newMessage);
+
+      // 2. Уведомляем конкретного получателя для обновления списка чатов
+      if (chat.driverId) {
+        chatNamespace
+          .to(`driver:${chat.driverId}`)
+          .emit("chat_updated", { chatId, lastMessage: newMessage });
+      } else if (chat.clientId) {
+        chatNamespace
+          .to(`client:${chat.clientId}`)
+          .emit("chat_updated", { chatId, lastMessage: newMessage });
+      }
+    }
 
     return res.status(201).json({
       success: true,
       data: newMessage,
     });
   } catch (error) {
-    // ДОБАВЛЕНО: Логирование для Senior Developer
     console.error("CRITICAL ERROR: sendMessage failed ->", error);
     return res.status(500).json({
       success: false,
@@ -241,11 +228,9 @@ export const sendMessage = async (req, res) => {
 };
 
 export const createBroadcastChat = async (req, res) => {
-  // ДОБАВЛЕНО: Запуск транзакции для обеспечения атомарности
   const t = await sequelize.transaction();
 
   try {
-    // ИЗМЕНЕНО: Теперь ожидаем content и optional contentType в теле запроса
     const { type, title, adminId, content, contentType = "text" } = req.body;
 
     const allowedTypes = ["broadcast_driver", "broadcast_client"];
@@ -258,7 +243,6 @@ export const createBroadcastChat = async (req, res) => {
       });
     }
 
-    // ДОБАВЛЕНО: Проверка наличия контента сообщения
     if (!title || !content) {
       await t.rollback();
       return res.status(400).json({
@@ -268,19 +252,12 @@ export const createBroadcastChat = async (req, res) => {
       });
     }
 
-    // 1. Создаем чат
     const chat = await Chat.create(
-      {
-        type,
-        title,
-        adminId,
-        status: "active",
-      },
+      { type, title, adminId, status: "active" },
       { transaction: t }
     );
 
-    // 2. ДОБАВЛЕНО: Сразу создаем первое и единственное сообщение
-    await ChatMessage.create(
+    const firstMsg = await ChatMessage.create(
       {
         chatId: chat.id,
         senderId: adminId,
@@ -292,15 +269,22 @@ export const createBroadcastChat = async (req, res) => {
       { transaction: t }
     );
 
-    // Фиксируем изменения в базе
     await t.commit();
+
+    // ИЗМЕНЕНО: Уведомление через сокеты о новой рассылке
+    const io = req.app.get("io");
+    if (io) {
+      const targetRoom = type === "broadcast_driver" ? "drivers" : "clients";
+      io.of("/chat")
+        .to(targetRoom)
+        .emit("new_chat", { chat, firstMessage: firstMsg });
+    }
 
     return res.status(201).json({
       success: true,
       data: chat,
     });
   } catch (error) {
-    // ДОБАВЛЕНО: Откат транзакции при любой ошибке
     await t.rollback();
     console.error("ОШИБКА createBroadcastChat:", error);
     return res.status(500).json({
@@ -311,15 +295,10 @@ export const createBroadcastChat = async (req, res) => {
   }
 };
 
-/**
- * Создание системного чата (System Notification) с первым сообщением
- */
 export const createSystemChat = async (req, res) => {
-  // ДОБАВЛЕНО: Запуск транзакции
   const t = await sequelize.transaction();
 
   try {
-    // ИЗМЕНЕНО: Добавлены поля content и contentType
     const {
       type,
       title,
@@ -340,7 +319,6 @@ export const createSystemChat = async (req, res) => {
       });
     }
 
-    // ДОБАВЛЕНО: Валидация контента
     if (!content) {
       await t.rollback();
       return res.status(400).json({
@@ -351,20 +329,17 @@ export const createSystemChat = async (req, res) => {
 
     if (type === "system_driver" && !driverId) {
       await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Не указан driverId для system_driver",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Не указан driverId" });
     }
     if (type === "system_client" && !clientId) {
       await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Не указан clientId для system_client",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Не указан clientId" });
     }
 
-    // 1. Создаем системный чат
     const chat = await Chat.create(
       {
         type,
@@ -377,8 +352,7 @@ export const createSystemChat = async (req, res) => {
       { transaction: t }
     );
 
-    // 2. ДОБАВЛЕНО: Создаем системное сообщение
-    await ChatMessage.create(
+    const firstMsg = await ChatMessage.create(
       {
         chatId: chat.id,
         senderId: adminId,
@@ -390,15 +364,23 @@ export const createSystemChat = async (req, res) => {
       { transaction: t }
     );
 
-    // Фиксируем изменения
     await t.commit();
+
+    // ИЗМЕНЕНО: Персональное уведомление пользователю
+    const io = req.app.get("io");
+    if (io) {
+      const targetRoom =
+        type === "system_driver" ? `driver:${driverId}` : `client:${clientId}`;
+      io.of("/chat")
+        .to(targetRoom)
+        .emit("new_chat", { chat, firstMessage: firstMsg });
+    }
 
     return res.status(201).json({
       success: true,
       data: chat,
     });
   } catch (error) {
-    // ДОБАВЛЕНО: Откат транзакции
     await t.rollback();
     console.error("ОШИБКА createSystemChat:", error);
     return res.status(500).json({
