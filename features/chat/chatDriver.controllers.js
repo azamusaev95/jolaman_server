@@ -3,8 +3,11 @@ import Chat from "./chat.model.js";
 import ChatMessage from "../chatMessage/chatMessage.model.js";
 import Order from "../order/order.model.js";
 import Client from "../client/client.model.js";
-import sequelize from "../../config/db.js"; // ДОБАВЛЕНО: импорт для транзакций
+import sequelize from "../../config/db.js";
 
+// ======================================================
+// Получение списка чатов для водителя
+// ======================================================
 export const getAllChatsForDriver = async (req, res) => {
   try {
     const driverId = req.user.id;
@@ -34,7 +37,7 @@ export const getAllChatsForDriver = async (req, res) => {
         ],
       },
       limit: numericLimit,
-      offset: offset,
+      offset,
       order: [["updatedAt", "DESC"]],
       include: [
         {
@@ -59,9 +62,11 @@ export const getAllChatsForDriver = async (req, res) => {
 
     const items = chats.map((chat) => {
       const chatJson = chat.toJSON();
+
       const lastOtherMsgAt = chatJson.lastOtherMessageAt
         ? new Date(chatJson.lastOtherMessageAt)
         : null;
+
       const driverReadAt = chatJson.driverLastReadAt
         ? new Date(chatJson.driverLastReadAt)
         : null;
@@ -69,6 +74,7 @@ export const getAllChatsForDriver = async (req, res) => {
       chatJson.hasUnread = lastOtherMsgAt
         ? !driverReadAt || lastOtherMsgAt > driverReadAt
         : false;
+
       return chatJson;
     });
 
@@ -92,6 +98,9 @@ export const getAllChatsForDriver = async (req, res) => {
   }
 };
 
+// ======================================================
+// Создание обращения в поддержку от водителя
+// ======================================================
 export const createSupportChatByDriver = async (req, res) => {
   const t = await sequelize.transaction();
 
@@ -101,13 +110,18 @@ export const createSupportChatByDriver = async (req, res) => {
 
     if (!content || content.trim() === "") {
       await t.rollback();
-      return res
-        .status(400)
-        .json({ success: false, message: "Сообщение не может быть пустым" });
+      return res.status(400).json({
+        success: false,
+        message: "Сообщение не может быть пустым",
+      });
     }
 
     let chat = await Chat.findOne({
-      where: { driverId, type: "support_driver", status: "active" },
+      where: {
+        driverId,
+        type: "support_driver",
+        status: "active",
+      },
       transaction: t,
     });
 
@@ -117,7 +131,7 @@ export const createSupportChatByDriver = async (req, res) => {
       chat = await Chat.create(
         {
           type: "support_driver",
-          driverId: driverId,
+          driverId,
           status: "active",
           driverLastReadAt: new Date(),
         },
@@ -142,17 +156,22 @@ export const createSupportChatByDriver = async (req, res) => {
 
     await t.commit();
 
-    // ИЗМЕНЕНО: Уведомляем админов о новом обращении
+    // Socket-уведомления
     const io = req.app.get("io");
     if (io) {
       const nsp = io.of("/chat");
+
       if (isNewChat) {
-        nsp.to("admins").emit("new_chat", { chat, firstMessage: newMessage });
+        nsp.to("admins").emit("new_chat", {
+          chat,
+          firstMessage: newMessage,
+        });
       } else {
         nsp.to(String(chat.id)).emit("new_message", newMessage);
-        nsp
-          .to("admins")
-          .emit("chat_updated", { chatId: chat.id, lastMessage: newMessage });
+        nsp.to("admins").emit("chat_updated", {
+          chatId: chat.id,
+          lastMessage: newMessage,
+        });
       }
     }
 
@@ -161,7 +180,7 @@ export const createSupportChatByDriver = async (req, res) => {
       data: { chat, message: newMessage },
     });
   } catch (error) {
-    if (t) await t.rollback();
+    await t.rollback();
     console.error("ОШИБКА createSupportChatByDriver:", error);
     return res.status(500).json({
       success: false,
@@ -171,22 +190,36 @@ export const createSupportChatByDriver = async (req, res) => {
   }
 };
 
+// ======================================================
+// Отправка сообщения водителем
+// ======================================================
 export const sendMessageByDriver = async (req, res) => {
   const t = await sequelize.transaction();
 
   try {
-    const { id: chatId } = req.params;
+    const { chatId } = req.params; // ✅ ИСПРАВЛЕНО
     const { content, contentType = "text" } = req.body;
     const driverId = req.user.id;
 
+    if (!chatId) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "chatId отсутствует в URL",
+      });
+    }
+
     const chat = await Chat.findOne({
-      where: { id: chatId, driverId: driverId },
+      where: { id: chatId, driverId },
       transaction: t,
     });
 
     if (!chat) {
       await t.rollback();
-      return res.status(404).json({ success: false, message: "Чат не найден" });
+      return res.status(404).json({
+        success: false,
+        message: "Чат не найден",
+      });
     }
 
     const newMessage = await ChatMessage.create(
@@ -202,27 +235,33 @@ export const sendMessageByDriver = async (req, res) => {
     );
 
     await chat.update(
-      { driverLastReadAt: new Date(), updatedAt: new Date() },
+      {
+        driverLastReadAt: new Date(),
+        updatedAt: new Date(),
+      },
       { transaction: t }
     );
 
     await t.commit();
 
-    // ИЗМЕНЕНО: Сокет-уведомления
+    // Socket-уведомления
     const io = req.app.get("io");
     if (io) {
       const nsp = io.of("/chat");
-      // В саму комнату чата
+
       nsp.to(String(chatId)).emit("new_message", newMessage);
-      // Админам для обновления списка и счетчиков
-      nsp
-        .to("admins")
-        .emit("chat_updated", { chatId, lastMessage: newMessage });
+      nsp.to("admins").emit("chat_updated", {
+        chatId,
+        lastMessage: newMessage,
+      });
     }
 
-    return res.status(201).json({ success: true, data: newMessage });
+    return res.status(201).json({
+      success: true,
+      data: newMessage,
+    });
   } catch (error) {
-    if (t) await t.rollback();
+    await t.rollback();
     console.error("ОШИБКА sendMessageByDriver:", error);
     return res.status(500).json({
       success: false,
@@ -232,6 +271,9 @@ export const sendMessageByDriver = async (req, res) => {
   }
 };
 
+// ======================================================
+// Получение сообщений чата водителем
+// ======================================================
 export const getMessagesForDriver = async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -241,12 +283,22 @@ export const getMessagesForDriver = async (req, res) => {
     const take = parseInt(limit) || 50;
     const skip = (parseInt(page) - 1) * take;
 
+    if (!chatId) {
+      return res.status(400).json({
+        success: false,
+        message: "chatId отсутствует в URL",
+      });
+    }
+
     const chat = await Chat.findOne({
-      where: { id: chatId, driverId: driverId },
+      where: { id: chatId, driverId },
     });
 
     if (!chat) {
-      return res.status(404).json({ success: false, message: "Чат не найден" });
+      return res.status(404).json({
+        success: false,
+        message: "Чат не найден",
+      });
     }
 
     chat.driverLastReadAt = new Date();
