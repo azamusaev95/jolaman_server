@@ -5,9 +5,6 @@ import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
 import { Op } from "sequelize";
 
-/**
- * Контроллер для получения чатов администратора
- */
 export const getAllChatsForAdmin = async (req, res) => {
   try {
     const { type, status, page = 1, limit = 15 } = req.query;
@@ -26,9 +23,22 @@ export const getAllChatsForAdmin = async (req, res) => {
     // 2. Основной запрос к БД
     const chats = await Chat.findAll({
       where: whereCondition,
+      attributes: {
+        include: [
+          // ДОБАВЛЕНО: Подзапрос для получения даты последнего сообщения НЕ от админа
+          [
+            Sequelize.literal(`(
+              SELECT MAX(created_at)
+              FROM chat_messages AS cm
+              WHERE cm.chat_id = "Chat".id
+              AND cm.sender_role != 'admin'
+            )`),
+            "lastNonAdminMessageAt",
+          ],
+        ],
+      },
       limit: numericLimit,
       offset: offset,
-      // УДАЛЕНО: Лишние вычисления unread, только сортировка по обновлению
       order: [["updatedAt", "DESC"]],
       include: [
         {
@@ -36,12 +46,13 @@ export const getAllChatsForAdmin = async (req, res) => {
           as: "messages",
           separate: true,
           limit: 1,
+          // УДАЛЕНО: Фильтр по роли (теперь берем абсолютно последнее сообщение)
           order: [["createdAt", "DESC"]],
         },
         {
           model: Client,
           as: "client",
-          attributes: ["id", "name", "phone"], // ИЗМЕНЕНО: firstName -> name
+          attributes: ["id", "name", "phone"],
         },
         {
           model: Driver,
@@ -51,14 +62,33 @@ export const getAllChatsForAdmin = async (req, res) => {
         {
           model: Order,
           as: "order",
-          attributes: ["id", "status", "publicNumber"], // ИЗМЕНЕНО: number -> publicNumber
+          attributes: ["id", "status", "publicNumber"],
         },
       ],
     });
 
     // 3. Формируем чистый массив объектов (items)
-    // УДАЛЕНО: Маппинг с проверкой unread сообщений
-    const items = chats.map((chat) => chat.toJSON());
+    const items = chats.map((chat) => {
+      const chatJson = chat.toJSON();
+
+      // ДОБАВЛЕНО: Логика определения "непрочитанности" для админа
+      const lastUserMsgAt = chatJson.lastNonAdminMessageAt
+        ? new Date(chatJson.lastNonAdminMessageAt)
+        : null;
+      const adminReadAt = chatJson.adminLastReadAt
+        ? new Date(chatJson.adminLastReadAt)
+        : null;
+
+      // Если есть сообщение от юзера, и оно новее, чем админ читал, или админ вообще не читал
+      chatJson.hasUnread = lastUserMsgAt
+        ? !adminReadAt || lastUserMsgAt > adminReadAt
+        : false;
+
+      // Удаляем техническое поле подзапроса из выдачи, если оно не нужно фронту
+      // delete chatJson.lastNonAdminMessageAt;
+
+      return chatJson;
+    });
 
     // 4. Возврат данных в запрошенном формате
     return res.status(200).json({
@@ -71,7 +101,6 @@ export const getAllChatsForAdmin = async (req, res) => {
       },
     });
   } catch (error) {
-    // ДОБАВЛЕНО: Логирование для отладки
     console.error("ОШИБКА getAllChatsForAdmin:", error);
     return res.status(500).json({
       success: false,
@@ -80,6 +109,7 @@ export const getAllChatsForAdmin = async (req, res) => {
     });
   }
 };
+
 export const getMessagesByChatId = async (req, res) => {
   try {
     const { chatId } = req.params;
