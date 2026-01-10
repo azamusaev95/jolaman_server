@@ -3,7 +3,7 @@ import ChatMessage from "../chatMessage/chatMessage.model.js";
 import Order from "../order/order.model.js";
 import Client from "../client/client.model.js";
 import Driver from "../driver/driver.model.js";
-import { Op } from "sequelize";
+import Sequelize, { Op } from "sequelize";
 
 const READ_ONLY_TYPES = new Set([
   "broadcast_driver",
@@ -329,7 +329,6 @@ export const getChatMessages = async (req, res) => {
   }
 };
 
-
 export const getAllChats = async (req, res) => {
   try {
     const { orderId, status, type, page = 1, limit = 10 } = req.query;
@@ -468,8 +467,6 @@ export const getAllChats = async (req, res) => {
   }
 };
 
-
-
 export const getDriverChats = async (req, res) => {
   try {
     const driverId = req.user?.id;
@@ -558,7 +555,6 @@ export const getDriverChats = async (req, res) => {
     });
   }
 };
-
 
 // @map: createSupportChatWithDriver
 export const createSupportChatWithDriver = async (req, res) => {
